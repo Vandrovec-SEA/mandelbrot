@@ -9,9 +9,12 @@ CONFIG += c++11
 SOURCES += \
         MandelEvaluator.cpp \
         MandelImageCombiner.cpp \
+        MandelMath.cpp \
         MandelModel.cpp \
         ShareableImageWrapper.cpp \
-        main.cpp
+        double_double.cpp \
+        main.cpp \
+        multiprec.cpp
 
 RESOURCES += qml.qrc
 
@@ -29,5 +32,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 HEADERS += \
   MandelEvaluator.hpp \
   MandelImageCombiner.hpp \
+  MandelMath.hpp \
   MandelModel.hpp \
-  ShareableImageWrapper.hpp
+  ShareableImageWrapper.hpp \
+  double_double.hpp \
+  multiprec.hpp

@@ -49,8 +49,8 @@ Window {
                 pressx=mouse.x;
                 pressy=mouse.y;
             };
-            //labelCX.text=mandelModel.pixelXtoRE(mouse.x);
-            //labelCY.text=mandelModel.pixelYtoIM(mouse.y);
+            //labelCX.text=mandelModel.pixelXtoRE_str(mouse.x);
+            //labelCY.text=mandelModel.pixelYtoIM_str(mouse.y);
             labelCX.text=mouse.x;
             labelCY.text=mouse.y;
         }
