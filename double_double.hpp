@@ -3,15 +3,27 @@
 
 namespace MandelMath {
 
-class double_double {
+void fpu_fix_start(unsigned int *old_cw);
+void fpu_fix_end(unsigned int *old_cw);
+
+class dd_real {
+protected:
+  inline void quick_two_sum(double a, double b);
+  inline void two_sum(double a, double b);
+  inline void split(double a);
+  inline void two_prod(double a, double b);
+  inline void two_sqr(double a);
 public:
-  double_double(): hi(0), lo(0) { }
+  dd_real(): hi(0), lo(0) { }
   double hi;
   double lo;
+  void assign(const dd_real &src) { hi=src.hi; lo=src.lo; }
   void chs() { hi=-hi; lo=-lo; }
+  void lshift(int exp); //*=2^exp
   void add_double(double h2);
   void add(double h2, double l2);
   void mul(double h2, double l2);
+  void sqr();
 };
 
 } // namespace MandelMath

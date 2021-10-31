@@ -30,7 +30,7 @@ public:
 public slots:
   void donePixel(MandelEvaluator *me);
 protected:
-  MandelMath::number_store::DbgType currentMath;
+  //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
@@ -52,7 +52,7 @@ protected:
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
     Position();
-    void setNumberType(MandelMath::number_store::DbgType ntype);
+    void setNumberType(MandelMath::number::Type ntype);
     void move(int delta_x, int delta_y);
     void scale(int inlog, int center_x, int center_y);
     void updateCachedDepth();

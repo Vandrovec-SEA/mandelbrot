@@ -14,32 +14,26 @@ MandelMath::number_any::number_any(number_store *store):
 }
 
 MandelMath::number_any::number_any(number_any *src):
-  d(&my_store), dd(&my_store), m(&my_store)
+  d(&my_store), dd(&my_store), m(&my_store), impl(nullptr)
 {
+  reinit(src->ntype());
   switch (src->ntype())
   {
-    case MandelMath::number_store::DbgType::typeDouble:
+    case MandelMath::number::Type::typeDouble:
     {
-      my_store.init_double();
       my_store.assign_double(*src->impl->store);
-      impl=&d;
     } break;
-    case MandelMath::number_store::DbgType::typeDDouble:
+    case MandelMath::number::Type::typeDDouble:
     {
-      my_store.init_ddouble();
       my_store.assign_ddouble(*src->impl->store);
-      impl=&dd;
     } break;
-    case MandelMath::number_store::DbgType::typeMulti:
+    case MandelMath::number::Type::typeMulti:
     {
-      my_store.init_multi();
       my_store.assign_multi(*src->impl->store);
-      impl=&m;
     } break;
-    case MandelMath::number_store::DbgType::typeEmpty:
+    case MandelMath::number::Type::typeEmpty:
     {
       dbgPoint();
-      impl=nullptr;
     } break;
   }
 }
@@ -79,65 +73,52 @@ MandelMath::number_any::number_any(MandelMath::number_store::DbgType ntype, Mand
 }
 */
 
-void MandelMath::number_any::reinit(MandelMath::number_store::DbgType ntype)
+void MandelMath::number_any::reinit(MandelMath::number::Type ntype)
 { //TODO: should try to convert old value to new type
+  MandelMath::number::Type old_ntype=this->ntype();
+  if (ntype==old_ntype)
+    return;
+  if (impl)
+    impl->store->cleanup(old_ntype);
   switch (ntype)
   {
-    case MandelMath::number_store::DbgType::typeDouble:
+    case MandelMath::number::Type::typeDouble:
     {
-      if (impl==&d)
-        return;
-      if (impl==&dd)
-        dd.store->cleanup_ddouble();
-      else if (impl==&m)
-        m.store->cleanup_multi();
-      else if (impl!=nullptr)
-        dbgPoint();
       impl=&d;
-      d.store->init_double();
     } break;
-    case MandelMath::number_store::DbgType::typeDDouble:
+    case MandelMath::number::Type::typeDDouble:
     {
-      if (impl==&dd)
-        return;
-      if (impl==&d)
-        dd.store->cleanup_double();
-      else if (impl==&m)
-        m.store->cleanup_multi();
-      else if (impl!=nullptr)
-        dbgPoint();
       impl=&dd;
-      dd.store->init_ddouble();
     } break;
-    case MandelMath::number_store::DbgType::typeMulti:
+    case MandelMath::number::Type::typeMulti:
     {
-      if (impl==&m)
-        return;
-      if (impl==&dd)
-        dd.store->cleanup_ddouble();
-      else if (impl==&d)
-        d.store->cleanup_double();
-      else if (impl!=nullptr)
-        dbgPoint();
       impl=&m;
-      d.store->init_multi();
     } break;
-    case MandelMath::number_store::DbgType::typeEmpty:
+    case MandelMath::number::Type::typeEmpty:
     {
-      if (impl==nullptr)
-        return;
-      if (impl==&d)
-        d.store->cleanup_double();
-      else if (impl==&dd)
-        dd.store->cleanup_ddouble();
-      else if (impl==&m)
-        m.store->cleanup_multi();
-      else
-        dbgPoint();
       impl=nullptr;
     } break;
   }
+  if (impl)
+    impl->store->init(ntype);
+
 }
+
+MandelMath::number::Type MandelMath::number_any::ntype()
+{
+  if (impl==nullptr)
+    return MandelMath::number::Type::typeEmpty;
+  else if (impl==&d)
+    return MandelMath::number::Type::typeDouble;
+  else if (impl==&dd)
+    return MandelMath::number::Type::typeDDouble;
+  else if (impl==&m)
+    return MandelMath::number::Type::typeMulti;
+  else
+    dbgPoint();
+  return MandelMath::number::Type::typeEmpty;
+}
+
 
 
 MandelPoint::MandelPoint(): zr_(), zi_()
@@ -171,15 +152,29 @@ void MandelPoint::assign_multi(const MandelPoint &src)
   iter=src.iter;
 }
 
-void MandelPoint::init_double()
+void MandelPoint::init(MandelMath::number::Type ntype)
 {
-  //zr_.cleanup_double();
-  zr_.init_double(0.0);
-  //zi_.cleanup_double();
-  zi_.init_double(0.0);
+  zr_.init(ntype, 0.0);
+  zi_.init(ntype, 0.0);
   state=State::stUnknown;
   iter=0;
 }
+
+void MandelPoint::zero(MandelMath::number::Type ntype)
+{
+  zr_.zero(ntype, 0.0);
+  zi_.zero(ntype, 0.0);
+  state=State::stUnknown;
+  iter=0;
+}
+
+void MandelPoint::cleanup(MandelMath::number::Type ntype)
+{
+  zr_.cleanup(ntype);
+  zi_.cleanup(ntype);
+}
+
+
 
 
 
@@ -200,8 +195,8 @@ MandelEvaluator::MandelEvaluator(): QThread(nullptr), currentParams(),
 MandelEvaluator::~MandelEvaluator()
 {
   //data_zi_n won't autoclean because the store is external
-  data_zi_n.reinit(MandelMath::number_store::DbgType::typeEmpty);
-  data_zr_n.reinit(MandelMath::number_store::DbgType::typeEmpty);
+  data_zi_n.reinit(MandelMath::number::Type::typeEmpty);
+  data_zr_n.reinit(MandelMath::number::Type::typeEmpty);
 }
 
 void MandelEvaluator::simple_double(double cr, double ci, MandelPoint &data, int maxiter)
@@ -228,12 +223,33 @@ void MandelEvaluator::simple_double(double cr, double ci, MandelPoint &data, int
   data.zi_.as.doubl=zi;
 }
 
-void MandelEvaluator::simple_ddouble(MandelMath::double_double cr, MandelMath::double_double ci, MandelPoint &data, int maxiter)
+void MandelEvaluator::simple_ddouble(MandelMath::dd_real *cr, MandelMath::dd_real *ci, MandelPoint &data, int maxiter)
 {
-  (void)cr;
-  (void)ci;
-  data.state=MandelPoint::State::stMaxIter;
+  MandelMath::dd_real zr;
+  MandelMath::dd_real zi;
+  MandelMath::dd_real r2;
+  MandelMath::dd_real i2;
+  MandelMath::dd_real t;
+  for (int iter=0; iter<maxiter; iter++)
+  {
+    r2.assign(zr); r2.sqr();
+    i2.assign(zi); i2.sqr();
+    t.assign(r2); t.add(i2.hi, i2.lo);
+    if (t.hi>4)
+    {
+      data.state=MandelPoint::State::stOutside;
+      data.iter=iter;
+      data.zr_.as.ddouble_.dd->assign(zr);
+      data.zi_.as.ddouble_.dd->assign(zi);
+      return;
+    };
+    t.assign(r2); t.add(-i2.hi, -i2.lo); t.add(cr->hi, cr->lo); //double tmp=zr*zr-zi*zi+cr;
+    zi.mul(2*zr.hi, 2*zr.lo); zi.add(ci->hi, ci->lo);
+    zr.assign(t);
+  }
   data.iter=maxiter;
+  data.zr_.as.ddouble_.dd->assign(zr);
+  data.zi_.as.ddouble_.dd->assign(zi);
 }
 
 void MandelEvaluator::simple_multi(MandelMath::multiprec *cr, MandelMath::multiprec *ci, MandelPoint &data, int maxiter)
@@ -251,7 +267,7 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
   data_zi_n.reinit(currentParams.ci_n.ntype());
   switch (currentParams.cr_n.ntype())
   {
-    case MandelMath::number_store::DbgType::typeDouble:
+    case MandelMath::number::Type::typeDouble:
     {
       currentData.assign_double(*data);
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
@@ -267,12 +283,12 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       timeInvokePostTotal+=timeInvoke.nsecsElapsed();
       return true;
     } break;
-    case MandelMath::number_store::DbgType::typeDDouble:
+    case MandelMath::number::Type::typeDDouble:
     {
       currentData.assign_ddouble(*data);
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
-        simple_ddouble(currentParams.cr_n.impl->store->as.ddouble, currentParams.ci_n.impl->store->as.ddouble, currentData, currentParams.maxiter);
+        simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
         pointsComputed++;
         return false;
       };
@@ -283,12 +299,12 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       timeInvokePostTotal+=timeInvoke.nsecsElapsed();
       return true;
     } break;
-    case MandelMath::number_store::DbgType::typeMulti:
+    case MandelMath::number::Type::typeMulti:
     {
       currentData.assign_multi(*data);
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
-        simple_multi(currentParams.cr_n.impl->store->as.multi.bytes, currentParams.ci_n.impl->store->as.multi.bytes, currentData, currentParams.maxiter);
+        simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
         pointsComputed++;
         return false;
       };
@@ -299,7 +315,7 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       timeInvokePostTotal+=timeInvoke.nsecsElapsed();
       return true;
     } break;
-   case MandelMath::number_store::DbgType::typeEmpty:
+   case MandelMath::number::Type::typeEmpty:
       dbgPoint();
   }
 
@@ -323,7 +339,7 @@ void MandelEvaluator::doCompute_ddouble()
 {
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
-  simple_ddouble(currentParams.cr_n.impl->store->as.ddouble, currentParams.ci_n.impl->store->as.ddouble, currentData, currentParams.maxiter);
+  simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();
@@ -334,7 +350,7 @@ void MandelEvaluator::doCompute_multi()
 {
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
-  simple_multi(currentParams.cr_n.impl->store->as.multi.bytes, currentParams.ci_n.impl->store->as.multi.bytes, currentData, currentParams.maxiter);
+  simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();

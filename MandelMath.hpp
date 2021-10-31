@@ -13,51 +13,13 @@ namespace MandelMath {
 
 double two_pow_n(unsigned int n);
 
-struct number_store
-{
-protected:
-  class multiprec_store
-  {
-  public:
-    multiprec_store(): _filler(nullptr), bytes(new multiprec())
-    {
-      static_assert (sizeof(multiprec_store)<=2*sizeof(double), "Try to keep multiprec itself small");
-    }
-    ~multiprec_store() { delete bytes; bytes=nullptr; }
-    void *_filler;
-    multiprec *bytes;
-  };
-
-public:
-  enum DbgType { typeEmpty, typeDouble, typeDDouble, typeMulti } dbgType;
-  number_store();
-  ~number_store();
-  void cleanup_double();
-  void cleanup_ddouble();
-  void cleanup_multi();
-  void init_double(double val=0); //should already be switched to empty
-  void init_ddouble(double val=0); //should already be switched to empty
-  void init_multi(double val=0); //should already be switched to empty
-  void zero_double(double val=0); //should already be switched to double
-  void zero_ddouble(double val=0); //should already be switched to ddouble
-  void zero_multi(double val=0); //should already be switched to multi
-  void assign_double(const number_store &other);
-  void assign_ddouble(const number_store &other);
-  void assign_multi(const number_store &other);
-
-  union As
-  {
-    As() {}
-    ~As() {}
-    double doubl;
-    double_double ddouble;
-    multiprec_store multi;
-  } as;
-};
+struct number_store;
 
 class number
 {
 public:
+  enum Type { typeEmpty, typeDouble, typeDDouble, typeMulti };
+
   number(number_store *store): store(store) { }
   number_store *store;
   virtual QString toString()=0;
@@ -76,17 +38,78 @@ public:
   virtual int toRound()=0;
 };
 
+struct number_store
+{
+protected:
+  class dd_real_managed
+  {
+  public:
+    dd_real_managed(): dd(nullptr)
+    {
+      static_assert (sizeof(dd_real_managed)<=sizeof(double), "Try to keep multiprec itself small");
+      dbgPoint(); //should not actually be constructed or destructed since it lives within the union number_store::As
+    }
+    void init() { dd=new dd_real(); }
+    void deinit() { delete dd; dd=nullptr; }
+    ~dd_real_managed() { dbgPoint(); delete dd; dd=nullptr; }
+    dd_real *dd;
+  };
+
+  class multiprec_managed
+  {
+  public:
+    multiprec_managed(): bytes(nullptr)
+    {
+      static_assert (sizeof(multiprec_managed)<=sizeof(double), "Try to keep multiprec itself small");
+      dbgPoint(); //should not actually be constructed or destructed since it lives within the union number_store::As
+    }
+    void init() { bytes=new multiprec(); }
+    void deinit() { delete bytes; bytes=nullptr; }
+    ~multiprec_managed() { dbgPoint(); delete bytes; bytes=nullptr; }
+    multiprec *bytes;
+  };
+
+public:
+  number::Type dbgType;
+  number_store();
+  ~number_store();
+  void cleanup(number::Type ntype);
+  void cleanup_double_();
+  void cleanup_ddouble_();
+  void cleanup_multi_();
+  void init(number::Type ntype, double val=0);
+  void init_double_(double val=0); //should already be switched to empty
+  void init_ddouble_(double val=0); //should already be switched to empty
+  void init_multi_(double val=0); //should already be switched to empty
+  void zero(number::Type ntype, double val=0);
+  void zero_double_(double val=0); //should already be switched to double
+  void zero_ddouble_(double val=0); //should already be switched to ddouble
+  void zero_multi_(double val=0); //should already be switched to multi
+  void assign_double(const number_store &other);
+  void assign_ddouble(const number_store &other);
+  void assign_multi(const number_store &other);
+
+  union As
+  {
+    As() {}
+    ~As() {}
+    double doubl;
+    dd_real_managed ddouble_;
+    multiprec_managed multi_;
+  } as;
+};
+
 class number_double: public number
 {
 public:
   number_double(number_store *store): number(store)
-  { assert((store->dbgType==number_store::DbgType::typeDouble) ||
-           (store->dbgType==number_store::DbgType::typeEmpty)); }
+  { assert((store->dbgType==Type::typeDouble) ||
+           (store->dbgType==Type::typeEmpty)); }
   QString toString() override;
   void init(double val=0) override;
   void zero(double val=0) override;
   void assign(const number_store *src) override { store->assign_double(*src); };
-  void cleanup() override { store->cleanup_double(); }
+  void cleanup() override { store->cleanup_double_(); }
   void lshift_(int shoft) override;
   void frac_pos() override;
   void add_double(double x) override;
@@ -102,13 +125,13 @@ class number_ddouble: public number
 {
 public:
   number_ddouble(number_store *store): number(store)
-  { assert((store->dbgType==number_store::DbgType::typeDDouble) ||
-           (store->dbgType==number_store::DbgType::typeEmpty)); }
+  { assert((store->dbgType==Type::typeDDouble) ||
+           (store->dbgType==Type::typeEmpty)); }
   QString toString() override;
   void init(double val=0) override;
   void zero(double val=0) override;
   void assign(const number_store *src) override { store->assign_ddouble(*src); };
-  void cleanup() override { store->cleanup_ddouble(); }
+  void cleanup() override { store->cleanup_ddouble_(); }
   void lshift_(int shoft) override;
   void frac_pos() override;
   void add_double(double x) override;
@@ -124,13 +147,13 @@ class number_multi: public number
 {
 public:
   number_multi(number_store *store): number(store)
-  { assert((store->dbgType==number_store::DbgType::typeMulti) ||
-           (store->dbgType==number_store::DbgType::typeEmpty)); }
+  { assert((store->dbgType==Type::typeMulti) ||
+           (store->dbgType==Type::typeEmpty)); }
   QString toString() override;
   void init(double val=0) override;
   void zero(double val=0) override;
   void assign(const number_store *src) override { store->assign_multi(*src); };;
-  void cleanup() override { store->cleanup_multi(); }
+  void cleanup() override { store->cleanup_multi_(); }
   void lshift_(int shoft) override;
   void frac_pos() override;
   void add_double(double x) override;

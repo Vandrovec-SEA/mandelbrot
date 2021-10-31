@@ -23,8 +23,8 @@ public:
   number_any(number_any *src);
   ~number_any();
   number *impl;
-  void reinit(number_store::DbgType ntype);
-  number_store::DbgType ntype();
+  void reinit(number::Type ntype);
+  number::Type ntype();
 
 };
 
@@ -40,7 +40,9 @@ struct MandelPoint
   void assign_double(const MandelPoint &src);
   void assign_ddouble(const MandelPoint &src);
   void assign_multi(const MandelPoint &src);
-  void init_double();
+  void init(MandelMath::number::Type ntype);
+  void zero(MandelMath::number::Type ntype);
+  void cleanup(MandelMath::number::Type ntype);
 };
 
 class MandelEvaluator: public QThread
@@ -50,7 +52,7 @@ public:
   MandelEvaluator();
   ~MandelEvaluator();
   static void simple_double(double cr, double ci, MandelPoint &data, int maxiter);
-  static void simple_ddouble(MandelMath::double_double cr, MandelMath::double_double ci, MandelPoint &data, int maxiter);
+  static void simple_ddouble(MandelMath::dd_real *cr, MandelMath::dd_real *ci, MandelPoint &data, int maxiter);
   static void simple_multi(MandelMath::multiprec *cr, MandelMath::multiprec *ci, MandelPoint &data, int maxiter);
 
   bool wantStop;
