@@ -11,7 +11,7 @@ void dbgPoint();
 
 namespace MandelMath {
 
-double two_pow_n(unsigned int n);
+//double two_pow_n(unsigned int n);
 
 struct number_store;
 
@@ -26,6 +26,7 @@ public:
   virtual void init(double val=0)=0;
   virtual void zero(double val=0)=0;
   virtual void assign(const number_store *src)=0;
+  virtual void assignTo(number_store *src)=0;
   virtual void cleanup()=0;
   virtual void lshift_(int shoft)=0; // self <<= shoft
   virtual void frac_pos()=0; //0<=result<1
@@ -34,8 +35,10 @@ public:
   virtual void sub(const number_store *other)=0;
   virtual void rsub(const number_store *other)=0;
   virtual void mul(const number_store *other)=0;
+  virtual void sqr()=0;
 
   virtual int toRound()=0;
+  virtual double toDouble()=0;
 };
 
 struct number_store
@@ -88,6 +91,9 @@ public:
   void assign_double(const number_store &other);
   void assign_ddouble(const number_store &other);
   void assign_multi(const number_store &other);
+  void assignTo_double(number_store &other);
+  void assignTo_ddouble(number_store &other);
+  void assignTo_multi(number_store &other);
 
   union As
   {
@@ -109,6 +115,7 @@ public:
   void init(double val=0) override;
   void zero(double val=0) override;
   void assign(const number_store *src) override { store->assign_double(*src); };
+  void assignTo(number_store *src) override { store->assignTo_double(*src); };
   void cleanup() override { store->cleanup_double_(); }
   void lshift_(int shoft) override;
   void frac_pos() override;
@@ -117,8 +124,10 @@ public:
   void sub(const number_store *other) override;
   void rsub(const number_store *other) override;
   void mul(const number_store *other) override;
+  void sqr() override;
 
   int toRound() override;
+  double toDouble() override;
 };
 
 class number_ddouble: public number
@@ -131,6 +140,7 @@ public:
   void init(double val=0) override;
   void zero(double val=0) override;
   void assign(const number_store *src) override { store->assign_ddouble(*src); };
+  void assignTo(number_store *src) override { store->assignTo_ddouble(*src); };
   void cleanup() override { store->cleanup_ddouble_(); }
   void lshift_(int shoft) override;
   void frac_pos() override;
@@ -139,8 +149,10 @@ public:
   void sub(const number_store *other) override;
   void rsub(const number_store *other) override;
   void mul(const number_store *other) override;
+  void sqr() override;
 
   int toRound() override;
+  double toDouble() override;
 };
 
 class number_multi: public number
@@ -153,6 +165,7 @@ public:
   void init(double val=0) override;
   void zero(double val=0) override;
   void assign(const number_store *src) override { store->assign_multi(*src); };;
+  void assignTo(number_store *src) override { store->assignTo_multi(*src); };;
   void cleanup() override { store->cleanup_multi_(); }
   void lshift_(int shoft) override;
   void frac_pos() override;
@@ -161,29 +174,25 @@ public:
   void sub(const number_store *other) override;
   void rsub(const number_store *other) override;
   void mul(const number_store *other) override;
+  void sqr() override;
 
   int toRound() override;
+  double toDouble() override;
 };
 
 class complex
 {
+  number *tmp1;
+  number *tmp2;
 public:
-  complex(number_store *re, number_store *im): re(re), im(im) { }
-  number_store *re;
-  number_store *im;
-  virtual void add(const complex *other)=0;
-  virtual void mul(const complex *other)=0;
+  complex(number *re, number *im, number *tmp1, number *tmp2): tmp1(tmp1), tmp2(tmp2), re(re), im(im) { }
+  number *re;
+  number *im;
+  number *getMagTmp();
+  void add(const complex *other);
+  void mul(const complex *other);
+  void sqr();
 };
-
-class complex_double: public complex
-{
-public:
-  complex_double(number_store *re, number_store *im): complex(re, im) { }
-  void add(const complex *other) override;
-  void mul(const complex *other) override;
-};
-
-//complex_multi might have some temporaries to prevent malloc all the time
 
 } // namespace MandelMath
 

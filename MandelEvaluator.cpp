@@ -265,6 +265,8 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
   //currentParams=params;
   data_zr_n.reinit(currentParams.cr_n.ntype());
   data_zi_n.reinit(currentParams.ci_n.ntype());
+  data_z_tmp1.reinit(currentParams.cr_n.ntype());
+  data_z_tmp2.reinit(currentParams.cr_n.ntype());
   switch (currentParams.cr_n.ntype())
   {
     case MandelMath::number::Type::typeDouble:
@@ -272,7 +274,8 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       currentData.assign_double(*data);
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
-        simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
+        //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
+        evaluate();
         pointsComputed++;
         return false;
       };
@@ -288,7 +291,8 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       currentData.assign_ddouble(*data);
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
-        simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
+        //simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
+        evaluate();
         pointsComputed++;
         return false;
       };
@@ -304,7 +308,8 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       currentData.assign_multi(*data);
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
-        simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
+        //simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
+        evaluate();
         pointsComputed++;
         return false;
       };
@@ -324,11 +329,36 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
   return false;
 }
 
+void MandelEvaluator::evaluate()
+{
+  MandelMath::complex c(currentParams.cr_n.impl, currentParams.ci_n.impl, nullptr, nullptr);
+  MandelMath::complex z(this->data_zr_n.impl, this->data_zi_n.impl, data_z_tmp1.impl, data_z_tmp2.impl);
+  for (int iter=currentData.iter; iter<currentParams.maxiter; iter++)
+  {
+    MandelMath::number *magtmp=z.getMagTmp();
+    if (magtmp->toDouble()>4)
+    {
+      currentData.state=MandelPoint::State::stOutside;
+      currentData.iter=iter;
+      z.re->assignTo(&currentData.zr_);
+      z.im->assignTo(&currentData.zi_);
+      return;
+    };
+    z.sqr();
+    z.add(&c);
+  }
+  //data.state=MandelPoint::State::stMaxIter;
+  currentData.iter=currentParams.maxiter;
+  z.re->assignTo(&currentData.zr_);
+  z.im->assignTo(&currentData.zi_);
+}
+
 void MandelEvaluator::doCompute_double()
 {
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
-  simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
+  //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
+  evaluate();
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();
@@ -339,7 +369,8 @@ void MandelEvaluator::doCompute_ddouble()
 {
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
-  simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
+  //simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
+  evaluate();
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();
@@ -350,7 +381,8 @@ void MandelEvaluator::doCompute_multi()
 {
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
-  simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
+  //simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
+  evaluate();
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();

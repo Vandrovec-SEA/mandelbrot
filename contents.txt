@@ -1,1 +1,16 @@
 deBruijn, ctz(): MandelModel#ctz16()
+
+
+
+TODO:
+getMandColor_
+if (mandel.mousePt.res in [resPeriod2, resPeriod3]) then
+  paintInternalRayThrough_
+if (mandel.mousePt.res in [resOutOnly, resOutExt]) then
+  paintExternalRayThrough_
+paintWayUp_
+paintPeriod_
+for tx:=0 to High(mandel.extRays) do
+  paintExternalRay(n, d, 1000)
+paint circle at julia.center
+findBifur aspol.

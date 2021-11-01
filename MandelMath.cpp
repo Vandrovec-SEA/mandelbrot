@@ -18,19 +18,19 @@ void dbgPoint()
 
 namespace MandelMath {
 
-double two_pow_n(unsigned int n)
+/*double two_pow_n(unsigned int n)
 {
   assert(n<4096);
   double result=1;
   while (n>=31)
   {
-    result*=(1<<31);
+    result*=(1u<<31);
     n-=31;
   }
   if (n>0)
-    result*=(1<<n);
+    result*=(1u<<n);
   return result;
-}
+}*/
 
 number_store::number_store(): dbgType(number::Type::typeEmpty)
 {
@@ -168,6 +168,30 @@ void number_store::assign_multi(const number_store &other)
   *as.multi_.bytes=*other.as.multi_.bytes;
 }
 
+void number_store::assignTo_double(number_store &other)
+{
+  assert(other.dbgType==number::Type::typeDouble);
+  assert(dbgType==number::Type::typeDouble);
+  other.as.doubl=as.doubl;
+}
+
+void number_store::assignTo_ddouble(number_store &other)
+{
+  assert(other.dbgType==number::Type::typeDDouble);
+  assert(dbgType==number::Type::typeDDouble);
+  //dbgType=number::Type::typeDDouble;
+  //as.ddouble_.dd->assign(*other.as.ddouble_.dd);
+  *other.as.ddouble_.dd=*as.ddouble_.dd;
+}
+
+void number_store::assignTo_multi(number_store &other)
+{
+  assert(other.dbgType==number::Type::typeMulti);
+  assert(dbgType==number::Type::typeMulti);
+  //dbgType=number::Type::typeMulti;
+  *other.as.multi_.bytes=*as.multi_.bytes;
+}
+
 
 
 
@@ -190,10 +214,11 @@ void number_double::zero(double val)
 void number_double::lshift_(int shoft)
 {
   assert(store->dbgType==number::Type::typeDouble);
-  if (shoft>0)
+  store->as.doubl=ldexp(store->as.doubl, shoft);
+  /*if (shoft>0)
     store->as.doubl*=two_pow_n(shoft);
   else if (shoft<0)
-    store->as.doubl/=two_pow_n(-shoft);
+    store->as.doubl/=two_pow_n(-shoft);*/
 }
 
 void number_double::frac_pos()
@@ -236,10 +261,22 @@ void number_double::mul(const number_store *other)
   store->as.doubl*=other->as.doubl;
 }
 
+void number_double::sqr()
+{
+  assert(store->dbgType==Type::typeDouble);
+  store->as.doubl*=store->as.doubl;
+}
+
 int number_double::toRound()
 {
   assert(store->dbgType==Type::typeDouble);
   return qRound(store->as.doubl);
+}
+
+double number_double::toDouble()
+{
+  assert(store->dbgType==Type::typeDouble);
+  return store->as.doubl;
 }
 
 
@@ -307,10 +344,22 @@ void number_ddouble::mul(const number_store *other)
   store->as.ddouble_.dd->mul(other->as.ddouble_.dd->hi, other->as.ddouble_.dd->lo);
 }
 
+void number_ddouble::sqr()
+{
+  assert(store->dbgType==Type::typeDDouble);
+  store->as.ddouble_.dd->sqr();
+}
+
 int number_ddouble::toRound()
 {
   assert(store->dbgType==Type::typeDDouble);
   return floor(store->as.ddouble_.dd->hi+0.5)+floor(store->as.ddouble_.dd->lo+0.5);
+}
+
+double number_ddouble::toDouble()
+{
+  assert(store->dbgType==Type::typeDDouble);
+  return store->as.ddouble_.dd->hi;
 }
 
 
@@ -335,16 +384,7 @@ void number_multi::zero(double val)
 void number_multi::lshift_(int shoft)
 {
   assert(store->dbgType==Type::typeMulti);
-  if (shoft>0)
-  {
-    double coeff=two_pow_n(shoft);
-    store->as.multi_.bytes->mul_double(coeff);
-  }
-  else if (shoft<0)
-  {
-    double coeff=two_pow_n(shoft);
-    store->as.multi_.bytes->mul_double(1/coeff);
-  }
+  store->as.multi_.bytes->lshift(shoft);
 }
 
 void number_multi::frac_pos()
@@ -389,35 +429,76 @@ void number_multi::mul(const number_store *other)
   store->as.multi_.bytes->mul(other->as.multi_.bytes);
 }
 
+void number_multi::sqr()
+{
+  assert(store->dbgType==Type::typeMulti);
+  store->as.multi_.bytes->sqr();
+}
+
 int number_multi::toRound()
 {
   assert(store->dbgType==Type::typeMulti);
   return store->as.multi_.bytes->round();
 }
 
-
-
-
-
-void complex_double::add(const complex *other)
+double number_multi::toDouble()
 {
-  assert(re->dbgType==number::Type::typeDouble);
-  assert(im->dbgType==number::Type::typeDouble);
-  assert(other->re->dbgType==number::Type::typeDouble);
-  assert(other->im->dbgType==number::Type::typeDouble);
-  re->as.doubl+=other->re->as.doubl;
-  im->as.doubl+=other->im->as.doubl;
+  assert(store->dbgType==Type::typeMulti);
+  return store->as.multi_.bytes->toDouble();
 }
 
-void complex_double::mul(const complex *other)
+
+
+
+
+number *complex::getMagTmp()
 {
-  assert(re->dbgType==number::Type::typeDouble);
-  assert(im->dbgType==number::Type::typeDouble);
-  assert(other->re->dbgType==number::Type::typeDouble);
-  assert(other->im->dbgType==number::Type::typeDouble);
-  double tmp=re->as.doubl*other->im->as.doubl + im->as.doubl*other->re->as.doubl;
-  im->as.doubl=re->as.doubl*other->re->as.doubl - im->as.doubl*other->im->as.doubl;
-  re->as.doubl=tmp;
+  tmp1->assign(re->store);
+  tmp1->sqr();
+  tmp2->assign(im->store);
+  tmp2->sqr();
+  tmp1->add(tmp2->store);
+  return tmp1;
+}
+
+void complex::add(const complex *other)
+{
+  re->add(other->re->store);
+  im->add(other->im->store);
+}
+
+void complex::mul(const complex *other)
+{
+  if ((tmp1==nullptr) || (tmp2==nullptr))
+    dbgPoint();
+  assert((tmp1!=nullptr) && (tmp2!=nullptr));
+  //r:=r1*r2-i1*i2
+  //i:=r1*i2+i1*r2
+  tmp1->assign(re->store);
+  tmp1->mul(other->re->store);
+  tmp2->assign(im->store);
+  tmp2->mul(other->im->store);
+  tmp1->sub(tmp2->store);
+  tmp2->assign(other->re->store);
+  re->mul(other->im->store);
+  im->mul(tmp2->store);
+  im->add(re->store);
+  re->assign(tmp1->store);
+}
+
+void complex::sqr()
+{
+  if ((tmp1==nullptr) || (tmp2==nullptr))
+    dbgPoint();
+  assert((tmp1!=nullptr) && (tmp2!=nullptr));
+  //r:=r*r-i*i
+  //i=2*r*i
+  tmp1->assign(im->store);
+  tmp1->sqr();
+  im->mul(re->store);
+  im->lshift_(1);
+  re->sqr();
+  re->sub(tmp1->store);
 }
 
 } // namespace MandelMath

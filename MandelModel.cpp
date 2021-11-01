@@ -275,7 +275,7 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
     //if (fabs(delta_y-qRound(delta_y))>0.0001)
     //  dbgPoint();
     //int delta_y_int=qRound(delta_y);
-    old_cim->rsub(new_cim);
+    old_cim->sub(new_cim); //and reversing y at the last minute
     old_cim->lshift_(new_step_log+step_scale_n_shift);
     delta_y_int=old_cim->toRound();
     delta_y_int-=(new_height/2)<<step_scale_n_shift;
@@ -383,6 +383,21 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
   }
 }
 
+void MandelModel::setView(double c_re, double c_im, double scale)
+{
+  MandelMath::number_any old_cre_n(&position.center_re_n);
+  MandelMath::number_any old_cim_n(&position.center_im_n);
+  int old_step_log=position.step_log;
+
+  position.setView(c_re, c_im, scale);
+
+  transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
+                 pointStore, imageWidth, imageHeight, position.center_re_n.impl->store, position.center_im_n.impl->store,
+                 position.step_log-old_step_log, position.step_log);
+
+  startNewEpoch();
+}
+
 void MandelModel::drag(double delta_x, double delta_y)
 {
   //qDebug()<<"drag ("<<delta_x<<","<<delta_y<<")";
@@ -392,6 +407,7 @@ void MandelModel::drag(double delta_x, double delta_y)
   int dx=qRound(delta_x);
   int dy=qRound(delta_y);
   position.move(dx, dy);
+  qDebug()<<"new c: re="<<position.center_re_n.impl->toString()<<",im="<<position.center_im_n.impl->toString();
 
   transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
                  pointStore, imageWidth, imageHeight, position.center_re_n.impl->store, position.center_im_n.impl->store,
@@ -404,12 +420,13 @@ void MandelModel::zoom(double x, double y, int inlog)
 {
   MandelMath::number_any old_cre_n(&position.center_re_n);
   MandelMath::number_any old_cim_n(&position.center_im_n);
+  int old_step_log=position.step_log;
 
-  position.scale(inlog, qRound(x)-imageWidth/2, qRound(y)-imageHeight/2);
+  position.scale(inlog, qRound(x)-imageWidth/2, imageHeight/2-qRound(y));
 
   transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
                  pointStore, imageWidth, imageHeight, position.center_re_n.impl->store, position.center_im_n.impl->store,
-                 inlog, position.step_log);
+                 position.step_log-old_step_log, position.step_log);
 
   startNewEpoch();
 }
@@ -552,10 +569,11 @@ void MandelModel::giveWork(MandelEvaluator *worker)
             else
             {
               position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, &worker->currentParams.cr_n);
-              position.pixelYtoIM(pointIndex/imageWidth - imageHeight/2, &worker->currentParams.ci_n);
+              position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &worker->currentParams.ci_n);
               worker->currentParams.epoch=epoch;
               worker->currentParams.pixelIndex=pointIndex;
               if (worker->startCompute(pointData, quickrun>=1000))
+              //if (worker->startCompute(pointData, true))
               {
                 worker->timeOuter.start();
                 lastGivenPointIndex_=pointIndex;
@@ -627,10 +645,10 @@ MandelModel::Position::Position():
   center_re_n(),
   center_im_n()
 {
-  //center_re_n.reinit(MandelMath::number::Type::typeDouble);
-  //center_im_n.reinit(MandelMath::number::Type::typeDouble);
-  center_re_n.reinit(MandelMath::number::Type::typeDDouble);
-  center_im_n.reinit(MandelMath::number::Type::typeDDouble);
+  center_re_n.reinit(MandelMath::number::Type::typeDouble);
+  center_im_n.reinit(MandelMath::number::Type::typeDouble);
+  //center_re_n.reinit(MandelMath::number::Type::typeDDouble);
+  //center_im_n.reinit(MandelMath::number::Type::typeDDouble);
   center_re_n.impl->zero(-0.5);
   center_im_n.impl->zero(0);
   step_log=7;
@@ -644,13 +662,22 @@ void MandelModel::Position::setNumberType(MandelMath::number::Type ntype)
   center_im_n.reinit(ntype);
 }
 
+void MandelModel::Position::setView(double c_re, double c_im, double scale)
+{
+  step_log=-ilogb(scale);
+  step_size__=ldexp(1.0, -step_log);
+  center_re_n.impl->zero(ldexp(round(ldexp(c_re, step_log)), -step_log));
+  center_im_n.impl->zero(ldexp(round(ldexp(c_im, step_log)), -step_log));
+  updateCachedDepth();
+}
+
 void MandelModel::Position::move(int delta_x, int delta_y)
 {
   //qDebug()<<"move ("<<delta_x<<","<<delta_y<<")";
   center_re_n.impl->add_double(-delta_x*step_size__);
-  center_im_n.impl->add_double(-delta_y*step_size__);
+  center_im_n.impl->add_double(+delta_y*step_size__);
   cached_center_re_mod=(cached_center_re_mod-delta_x+32768)%32768;
-  cached_center_im_mod=(cached_center_im_mod-delta_y+32768)%32768;
+  cached_center_im_mod=(cached_center_im_mod+delta_y+32768)%32768;
   int ccrm=cached_center_re_mod;
   int ccim=cached_center_im_mod;
   updateCachedDepth();
@@ -671,6 +698,8 @@ void MandelModel::Position::scale(int inlog, int center_x, int center_y)
     return;
   if (inlog>0)
   {
+    if (step_log+inlog>MAX_ZOOM_IN_DOUBLE)
+      return;
     double old_step_size=step_size__;
     step_log+=inlog;
     for (int i=0; i<inlog; i++)

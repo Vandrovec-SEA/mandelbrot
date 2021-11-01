@@ -80,8 +80,12 @@ public:
   MandelPoint currentData;
   MandelMath::number_any data_zr_n;
   MandelMath::number_any data_zi_n;
+  MandelMath::number_any data_z_tmp1;
+  MandelMath::number_any data_z_tmp2;
 
   bool startCompute(const MandelPoint *data, bool no_quick_route);
+protected:
+  void evaluate();
 protected slots:
   void doCompute_double();
   void doCompute_ddouble();

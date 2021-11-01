@@ -16,6 +16,7 @@ public:
   void transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number *old_cre, MandelMath::number *old_cim,
                       MandelPoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
                       int inlog, int new_step_log);
+  Q_INVOKABLE void setView(double c_re, double c_im, double scale);
   Q_INVOKABLE void drag(double delta_x, double delta_y);
   Q_INVOKABLE void zoom(double x, double y, int inlog);
   Q_INVOKABLE void setImageSize(int width, int height);
@@ -30,6 +31,7 @@ public:
 public slots:
   void donePixel(MandelEvaluator *me);
 protected:
+  constexpr static int MAX_ZOOM_IN_DOUBLE=53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
@@ -53,6 +55,7 @@ protected:
     int cached_center_im_mod;
     Position();
     void setNumberType(MandelMath::number::Type ntype);
+    void setView(double c_re, double c_im, double scale);
     void move(int delta_x, int delta_y);
     void scale(int inlog, int center_x, int center_y);
     void updateCachedDepth();

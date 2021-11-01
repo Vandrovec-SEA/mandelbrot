@@ -18,6 +18,11 @@ void multiprec::chs()
 
 }
 
+void multiprec::lshift(int shoft)
+{
+
+}
+
 void multiprec::frac_pos()
 {
 
@@ -43,7 +48,17 @@ void multiprec::mul(multiprec *other)
   (void)other;
 }
 
+void multiprec::sqr()
+{
+  mul(this);
+}
+
 int multiprec::round()
+{
+  return 0;
+}
+
+double multiprec::toDouble()
 {
   return 0;
 }
