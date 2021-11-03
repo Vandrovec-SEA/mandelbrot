@@ -568,6 +568,7 @@ void MandelModel::giveWork(MandelEvaluator *worker)
             }
             else
             {
+              worker->switchType(position.center_re_n.ntype());
               position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, &worker->currentParams.cr_n);
               position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &worker->currentParams.ci_n);
               worker->currentParams.epoch=epoch;
@@ -763,7 +764,7 @@ void MandelModel::Position::updateCachedDepth()
 void MandelModel::Position::pixelXtoRE(int x, MandelMath::number_any *result)
 {
   //return (x - imageWidth/2)*position.step_size+position.center_re;
-  result->reinit(center_re_n.ntype());
+  //should be already result->reinit(center_re_n.ntype());
   result->impl->assign(center_re_n.impl->store);
   result->impl->add_double(x*step_size__);
 }
@@ -771,7 +772,7 @@ void MandelModel::Position::pixelXtoRE(int x, MandelMath::number_any *result)
 void MandelModel::Position::pixelYtoIM(int y, MandelMath::number_any *result)
 {
   //return (y - imageHeight/2)*position.step_size+position.center_im;
-  result->reinit(center_im_n.ntype());
+  //should be already result->reinit(center_im_n.ntype());
   result->impl->assign(center_im_n.impl->store);
   result->impl->add_double(y*step_size__);
 }

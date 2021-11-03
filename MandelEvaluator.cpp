@@ -178,9 +178,11 @@ void MandelPoint::cleanup(MandelMath::number::Type ntype)
 
 
 
-MandelEvaluator::MandelEvaluator(): QThread(nullptr), currentParams(),
-  data_zr_n(&currentData.zr_),
-  data_zi_n(&currentData.zi_)
+MandelEvaluator::MandelEvaluator(): QThread(nullptr),
+  currentType(MandelMath::number::Type::typeEmpty),
+  currentParams()//,
+  //data_zr_n(&currentData.zr_),
+  //data_zi_n(&currentData.zi_)
 {
   QThread::start(QThread::Priority::LowestPriority);
   wantStop=false;
@@ -195,8 +197,28 @@ MandelEvaluator::MandelEvaluator(): QThread(nullptr), currentParams(),
 MandelEvaluator::~MandelEvaluator()
 {
   //data_zi_n won't autoclean because the store is external
-  data_zi_n.reinit(MandelMath::number::Type::typeEmpty);
-  data_zr_n.reinit(MandelMath::number::Type::typeEmpty);
+  switch (currentParams.cr_n.ntype())
+  {
+    case MandelMath::number::Type::typeDouble:
+    {
+      data_zr_s.cleanup_double_();
+      data_zi_s.cleanup_double_();
+    } break;
+    case MandelMath::number::Type::typeDDouble:
+    {
+      data_zr_s.cleanup_ddouble_();
+      data_zi_s.cleanup_ddouble_();
+    } break;
+    case MandelMath::number::Type::typeMulti:
+    {
+      data_zr_s.cleanup_multi_();
+      data_zi_s.cleanup_multi_();
+    } break;
+    case MandelMath::number::Type::typeEmpty: ;
+  }
+
+  currentParams.cr_n.reinit(MandelMath::number::Type::typeEmpty);
+  currentParams.ci_n.reinit(MandelMath::number::Type::typeEmpty);
 }
 
 void MandelEvaluator::simple_double(double cr, double ci, MandelPoint &data, int maxiter)
@@ -260,13 +282,28 @@ void MandelEvaluator::simple_multi(MandelMath::multiprec *cr, MandelMath::multip
   data.iter=maxiter;
 }
 
+void MandelEvaluator::switchType(MandelMath::number::Type ntype)
+{
+  if (ntype==currentType)
+    return;
+  currentParams.cr_n.reinit(ntype);
+  currentParams.ci_n.reinit(ntype);
+  currentData.cleanup(currentType);
+  currentData.init(ntype);
+  data_zr_s.cleanup(currentType);
+  data_zi_s.cleanup(currentType);
+  data_zr_s.init(ntype);
+  data_zi_s.init(ntype);
+  currentType=ntype;
+}
+
 bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
 {
   //currentParams=params;
-  data_zr_n.reinit(currentParams.cr_n.ntype());
+  /*data_zr_n.reinit(currentParams.cr_n.ntype());
   data_zi_n.reinit(currentParams.ci_n.ntype());
   data_z_tmp1.reinit(currentParams.cr_n.ntype());
-  data_z_tmp2.reinit(currentParams.cr_n.ntype());
+  data_z_tmp2.reinit(currentParams.cr_n.ntype());*/
   switch (currentParams.cr_n.ntype())
   {
     case MandelMath::number::Type::typeDouble:
@@ -275,7 +312,7 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
         //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
-        evaluate();
+        evaluate<MandelMath::number_double>();
         pointsComputed++;
         return false;
       };
@@ -292,7 +329,7 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
         //simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
-        evaluate();
+        evaluate<MandelMath::number_ddouble>();
         pointsComputed++;
         return false;
       };
@@ -309,7 +346,7 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
       if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
       {
         //simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
-        evaluate();
+        evaluate<MandelMath::number_multi>();
         pointsComputed++;
         return false;
       };
@@ -329,10 +366,13 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
   return false;
 }
 
+template <class T>
 void MandelEvaluator::evaluate()
 {
-  MandelMath::complex c(currentParams.cr_n.impl, currentParams.ci_n.impl, nullptr, nullptr);
-  MandelMath::complex z(this->data_zr_n.impl, this->data_zi_n.impl, data_z_tmp1.impl, data_z_tmp2.impl);
+  MandelMath::complex<T> c(currentParams.cr_n.impl->store, currentParams.ci_n.impl->store, true);
+  MandelMath::complex<T> z(&this->data_zr_s, &this->data_zi_s, true);
+  z.re.assign(&currentData.zr_);
+  z.im.assign(&currentData.zi_);
   for (int iter=currentData.iter; iter<currentParams.maxiter; iter++)
   {
     MandelMath::number *magtmp=z.getMagTmp();
@@ -340,8 +380,8 @@ void MandelEvaluator::evaluate()
     {
       currentData.state=MandelPoint::State::stOutside;
       currentData.iter=iter;
-      z.re->assignTo(&currentData.zr_);
-      z.im->assignTo(&currentData.zi_);
+      z.re.assignTo(&currentData.zr_);
+      z.im.assignTo(&currentData.zi_);
       return;
     };
     z.sqr();
@@ -349,8 +389,8 @@ void MandelEvaluator::evaluate()
   }
   //data.state=MandelPoint::State::stMaxIter;
   currentData.iter=currentParams.maxiter;
-  z.re->assignTo(&currentData.zr_);
-  z.im->assignTo(&currentData.zi_);
+  z.re.assignTo(&currentData.zr_);
+  z.im.assignTo(&currentData.zi_);
 }
 
 void MandelEvaluator::doCompute_double()
@@ -358,7 +398,7 @@ void MandelEvaluator::doCompute_double()
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
   //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
-  evaluate();
+  evaluate<MandelMath::number_double>();
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();
@@ -370,7 +410,7 @@ void MandelEvaluator::doCompute_ddouble()
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
   //simple_ddouble(currentParams.cr_n.impl->store->as.ddouble_.dd, currentParams.ci_n.impl->store->as.ddouble_.dd, currentData, currentParams.maxiter);
-  evaluate();
+  evaluate<MandelMath::number_ddouble>();
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();
@@ -382,7 +422,7 @@ void MandelEvaluator::doCompute_multi()
   timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
   timeInner.start();
   //simple_multi(currentParams.cr_n.impl->store->as.multi_.bytes, currentParams.ci_n.impl->store->as.multi_.bytes, currentData, currentParams.maxiter);
-  evaluate();
+  evaluate<MandelMath::number_multi>();
   pointsComputed++;
   //msleep(10);
   timeInnerTotal+=timeInner.nsecsElapsed();

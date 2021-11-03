@@ -55,6 +55,8 @@ public:
   static void simple_ddouble(MandelMath::dd_real *cr, MandelMath::dd_real *ci, MandelPoint &data, int maxiter);
   static void simple_multi(MandelMath::multiprec *cr, MandelMath::multiprec *ci, MandelPoint &data, int maxiter);
 
+  MandelMath::number::Type currentType;
+  void switchType(MandelMath::number::Type ntype);
   bool wantStop;
   int pointsComputed;
   QElapsedTimer timeOuter;
@@ -78,13 +80,16 @@ public:
   } currentParams;
 
   MandelPoint currentData;
-  MandelMath::number_any data_zr_n;
-  MandelMath::number_any data_zi_n;
-  MandelMath::number_any data_z_tmp1;
-  MandelMath::number_any data_z_tmp2;
+  MandelMath::number_store data_zr_s;
+  MandelMath::number_store data_zi_s;
+  //MandelMath::number_any data_zr_n;
+  //MandelMath::number_any data_zi_n;
+  //MandelMath::number_any data_z_tmp1;
+  //MandelMath::number_any data_z_tmp2;
 
   bool startCompute(const MandelPoint *data, bool no_quick_route);
 protected:
+  template <class T>
   void evaluate();
 protected slots:
   void doCompute_double();

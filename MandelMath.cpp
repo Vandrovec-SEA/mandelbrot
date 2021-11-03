@@ -143,6 +143,34 @@ void number_store::zero_multi_(double val)
   as.multi_.bytes->set(val);
 }
 
+template <>
+void number_store::assign<number_double>(const number_store &other)
+{
+  assert(other.dbgType==number::Type::typeDouble);
+  assert(dbgType==number::Type::typeDouble);
+  //dbgType=number::Type::typeDouble;
+  as.doubl=other.as.doubl;
+}
+
+template <>
+void number_store::assign<number_ddouble>(const number_store &other)
+{
+  assert(other.dbgType==number::Type::typeDDouble);
+  assert(dbgType==number::Type::typeDDouble);
+  //dbgType=number::Type::typeDDouble;
+  //as.ddouble_.dd->assign(*other.as.ddouble_.dd);
+  *as.ddouble_.dd=*other.as.ddouble_.dd;
+}
+
+template <>
+void number_store::assign<number_multi>(const number_store &other)
+{
+  assert(other.dbgType==number::Type::typeMulti);
+  assert(dbgType==number::Type::typeMulti);
+  //dbgType=number::Type::typeMulti;
+  *as.multi_.bytes=*other.as.multi_.bytes;
+}
+
 void number_store::assign_double(const number_store &other)
 {
   assert(other.dbgType==number::Type::typeDouble);
@@ -450,55 +478,58 @@ double number_multi::toDouble()
 
 
 
-
-number *complex::getMagTmp()
+template <class T>
+T *complex<T>::getMagTmp()
 {
-  tmp1->assign(re->store);
-  tmp1->sqr();
-  tmp2->assign(im->store);
-  tmp2->sqr();
-  tmp1->add(tmp2->store);
-  return tmp1;
+  tmp1.assign(re.store);
+  tmp1.sqr();
+  tmp2.assign(im.store);
+  tmp2.sqr();
+  tmp1.add(tmp2.store);
+  return &tmp1;
 }
 
-void complex::add(const complex *other)
+template <class T>
+void complex<T>::add(const complex<T> *other)
 {
-  re->add(other->re->store);
-  im->add(other->im->store);
+  re.add(other->re.store);
+  im.add(other->im.store);
 }
 
-void complex::mul(const complex *other)
+template <class T>
+void complex<T>::mul(const complex<T> *other)
 {
-  if ((tmp1==nullptr) || (tmp2==nullptr))
+  if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
     dbgPoint();
-  assert((tmp1!=nullptr) && (tmp2!=nullptr));
+  assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
   //r:=r1*r2-i1*i2
   //i:=r1*i2+i1*r2
-  tmp1->assign(re->store);
-  tmp1->mul(other->re->store);
-  tmp2->assign(im->store);
-  tmp2->mul(other->im->store);
-  tmp1->sub(tmp2->store);
-  tmp2->assign(other->re->store);
-  re->mul(other->im->store);
-  im->mul(tmp2->store);
-  im->add(re->store);
-  re->assign(tmp1->store);
+  tmp1.assign(re.store);
+  tmp1.mul(other->re.store);
+  tmp2.assign(im.store);
+  tmp2.mul(other->im.store);
+  tmp1.sub(tmp2.store);
+  tmp2.assign(other->re.store);
+  re.mul(other->im.store);
+  im.mul(tmp2.store);
+  im.add(re.store);
+  re.assign(tmp1.store);
 }
 
-void complex::sqr()
+template <class T>
+void complex<T>::sqr()
 {
-  if ((tmp1==nullptr) || (tmp2==nullptr))
+  if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
     dbgPoint();
-  assert((tmp1!=nullptr) && (tmp2!=nullptr));
+  assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
   //r:=r*r-i*i
   //i=2*r*i
-  tmp1->assign(im->store);
-  tmp1->sqr();
-  im->mul(re->store);
-  im->lshift_(1);
-  re->sqr();
-  re->sub(tmp1->store);
+  tmp1.assign(im.store);
+  tmp1.sqr();
+  im.mul(re.store);
+  im.lshift_(1);
+  re.sqr();
+  re.sub(tmp1.store);
 }
 
 } // namespace MandelMath

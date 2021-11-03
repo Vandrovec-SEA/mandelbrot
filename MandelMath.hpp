@@ -88,6 +88,7 @@ public:
   void zero_double_(double val=0); //should already be switched to double
   void zero_ddouble_(double val=0); //should already be switched to ddouble
   void zero_multi_(double val=0); //should already be switched to multi
+  template <class T> void assign(const number_store &other);
   void assign_double(const number_store &other);
   void assign_ddouble(const number_store &other);
   void assign_multi(const number_store &other);
@@ -180,19 +181,56 @@ public:
   double toDouble() override;
 };
 
+template <class T> struct number_to_type
+{
+public:
+  static const number::Type ntype;
+};
+
+template <> struct number_to_type<number_double>
+{ static const number::Type ntype=number::Type::typeDouble; };
+template <> struct number_to_type<number_ddouble>
+{ static const number::Type ntype=number::Type::typeDDouble; };
+template <> struct number_to_type<number_multi>
+{ static const number::Type ntype=number::Type::typeMulti; };
+
+template <class T>
 class complex
 {
-  number *tmp1;
-  number *tmp2;
+  bool external_stores;
+  number_store tmp1_s;
+  number_store tmp2_s;
+  T tmp1;
+  T tmp2;
 public:
-  complex(number *re, number *im, number *tmp1, number *tmp2): tmp1(tmp1), tmp2(tmp2), re(re), im(im) { }
-  number *re;
-  number *im;
-  number *getMagTmp();
+  //complex(number *re, number *im, number *tmp1, number *tmp2): tmp1(tmp1), tmp2(tmp2), re(re), im(im) { }
+  complex(number_store *re, number_store *im, bool external_stores=false):
+    external_stores(external_stores), tmp1(&tmp1_s), tmp2(&tmp2_s), re(re), im(im)
+  {
+    tmp1.init(number_to_type<T>::ntype);
+    tmp2.init(number_to_type<T>::ntype);
+  }
+  ~complex()
+  {
+    tmp2.cleanup();
+    tmp1.cleanup();
+    if (!external_stores)
+    {
+      im.cleanup();
+      re.cleanup();
+    };
+  }
+  T re;
+  T im;
+  T *getMagTmp();
   void add(const complex *other);
   void mul(const complex *other);
   void sqr();
 };
+
+template class complex<number_double>;
+template class complex<number_ddouble>;
+template class complex<number_multi>;
 
 } // namespace MandelMath
 

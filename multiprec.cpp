@@ -20,7 +20,7 @@ void multiprec::chs()
 
 void multiprec::lshift(int shoft)
 {
-
+  (void)shoft;
 }
 
 void multiprec::frac_pos()
