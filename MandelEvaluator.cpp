@@ -196,8 +196,9 @@ MandelEvaluator::MandelEvaluator(): QThread(nullptr),
 
 MandelEvaluator::~MandelEvaluator()
 {
+  switchType(MandelMath::number::Type::typeEmpty);
   //data_zi_n won't autoclean because the store is external
-  switch (currentParams.cr_n.ntype())
+  /*switch (currentParams.cr_n.ntype())
   {
     case MandelMath::number::Type::typeDouble:
     {
@@ -218,7 +219,7 @@ MandelEvaluator::~MandelEvaluator()
   }
 
   currentParams.cr_n.reinit(MandelMath::number::Type::typeEmpty);
-  currentParams.ci_n.reinit(MandelMath::number::Type::typeEmpty);
+  currentParams.ci_n.reinit(MandelMath::number::Type::typeEmpty);*/
 }
 
 void MandelEvaluator::simple_double(double cr, double ci, MandelPoint &data, int maxiter)
