@@ -13,19 +13,19 @@ struct number_any
 {
 protected:
   number_store my_store;
-  number_double d;
-  number_ddouble dd;
-  number_multi m;
+  /*number_worker_double d;
+  number_worker_ddouble dd;
+  number_worker_multi m;*/
 public:
   //number_any(MandelMath::number_store::DbgType ntype, MandelMath::number_store *src);
   number_any();
   number_any(number_store *store);
   number_any(number_any *src);
   ~number_any();
-  number *impl;
-  void reinit(number::Type ntype);
-  number::Type ntype();
-
+  number_worker *impl;
+  number_store *store;
+  void reinit(number_worker *worker);
+  number_worker *ntype_();
 };
 
 } //namespace MandelMath
@@ -37,12 +37,10 @@ struct MandelPoint
   MandelMath::number_store zr_, zi_;
   int iter;
   MandelPoint &operator =(MandelPoint &src) = delete;
-  void assign_double(const MandelPoint &src);
-  void assign_ddouble(const MandelPoint &src);
-  void assign_multi(const MandelPoint &src);
-  void init(MandelMath::number::Type ntype);
-  void zero(MandelMath::number::Type ntype);
-  void cleanup(MandelMath::number::Type ntype);
+  void assign(MandelMath::number_worker *worker, const MandelPoint &src);
+  void init(MandelMath::number_worker *worker);
+  void zero(MandelMath::number_worker *worker);
+  void cleanup(MandelMath::number_worker *worker);
 };
 
 class MandelEvaluator: public QThread
@@ -55,8 +53,9 @@ public:
   static void simple_ddouble(MandelMath::dd_real *cr, MandelMath::dd_real *ci, MandelPoint &data, int maxiter);
   static void simple_multi(MandelMath::multiprec *cr, MandelMath::multiprec *ci, MandelPoint &data, int maxiter);
 
-  MandelMath::number::Type currentType;
-  void switchType(MandelMath::number::Type ntype);
+  //MandelMath::number_worker::Type currentType;
+  MandelMath::number_worker *currentWorker;
+  void switchType(MandelMath::number_worker *worker);
   bool wantStop;
   int pointsComputed;
   QElapsedTimer timeOuter;
@@ -69,10 +68,10 @@ public:
 
   struct ComputeParams
   {
-    //MandelMath::number_store cr_s;
-    //MandelMath::number_store ci_s;
-    MandelMath::number_any cr_n;
-    MandelMath::number_any ci_n;
+    MandelMath::number_store cr_s;
+    MandelMath::number_store ci_s;
+    //MandelMath::number_any cr_n;
+    //MandelMath::number_any ci_n;
     int epoch;
     int pixelIndex;
     int maxiter;
@@ -89,12 +88,9 @@ public:
 
   bool startCompute(const MandelPoint *data, bool no_quick_route);
 protected:
-  template <class T>
   void evaluate();
 protected slots:
-  void doCompute_double();
-  void doCompute_ddouble();
-  void doCompute_multi();
+  void doCompute();
 signals:
   void doneCompute(MandelEvaluator *me);
 };

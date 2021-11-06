@@ -210,10 +210,9 @@ MandelModel::~MandelModel()
   threadCount=0;
   threads=nullptr;
 
-  MandelMath::number::Type ntype=position.center_re_n.ntype();
   for (int i=imageWidth*imageHeight-1; i>=0; i--)
   {
-    pointStore[i].cleanup(ntype);
+    pointStore[i].cleanup(position.worker);
   }
 
   delete[] pointStore;
@@ -224,17 +223,23 @@ MandelModel::~MandelModel()
 
 QString MandelModel::pixelXtoRE_str(int x)
 {
-  MandelMath::number_any num(&position.center_re_n);
-  num.impl->add_double((x - imageWidth/2)*position.step_size__);
-  return num.impl->toString();
+  MandelMath::number_store num;
+  position.worker->assign(&num, &position.center_re_s);
+  position.worker->add_double(&num, (x - imageWidth/2)*position.step_size__);
+  QString result=position.worker->toString(&num);
+  position.worker->cleanup(&num);
+  return result;
 }
 
 QString MandelModel::pixelYtoIM_str(int y)
 {
 //  return (y - imageHeight/2)*position.step_size+position.center_im;
-  MandelMath::number_any num(&position.center_im_n);
-  num.impl->add_double((y - imageHeight/2)*position.step_size__);
-  return num.impl->toString();
+  MandelMath::number_store num;
+  position.worker->assign(&num, &position.center_im_s);
+  position.worker->add_double(&num, (y - imageHeight/2)*position.step_size__);
+  QString result=position.worker->toString(&num);
+  position.worker->cleanup(&num);
+  return result;
 }
 
 QString MandelModel::getTimes()
@@ -249,10 +254,15 @@ QString MandelModel::getTimes()
   return result;
 }
 
-void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number *old_cre, MandelMath::number *old_cim,
+void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
                                  MandelPoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
                                  int inlog, int new_step_log)
 {
+  if (position.worker==nullptr)
+  {
+    dbgPoint();
+    return;
+  };
   //(oldx-width/2)*old_step+old_cre = (newx-width/2)*new_step+new_cre
   //oldx = (width/2) + (newx-width/2+(new_cre-old_cre)/new_step)*new_step/old_step
   int step_scale_n_shift, step_scale_d_shift, step_scale_d_mask;
@@ -275,9 +285,9 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
     //if (fabs(delta_y-qRound(delta_y))>0.0001)
     //  dbgPoint();
     //int delta_y_int=qRound(delta_y);
-    old_cim->sub(new_cim); //and reversing y at the last minute
-    old_cim->lshift_(new_step_log+step_scale_n_shift);
-    delta_y_int=old_cim->toRound();
+    position.worker->sub(old_cim, new_cim); //and reversing y at the last minute
+    position.worker->lshift_(old_cim, new_step_log+step_scale_n_shift);
+    delta_y_int=position.worker->toRound(old_cim);
     delta_y_int-=(new_height/2)<<step_scale_n_shift;
 
     //double delta_x=-new_width/2+(new_cre-old_cre)/new_step;
@@ -285,13 +295,12 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
     //if (fabs(delta_x-qRound(delta_x))>0.0001)
     //  dbgPoint();
     //int delta_x_int=qRound(delta_x);
-    old_cre->rsub(new_cre);
-    old_cre->lshift_(new_step_log+step_scale_n_shift);
-    delta_x_int=old_cre->toRound();
+    position.worker->rsub(old_cre, new_cre);
+    position.worker->lshift_(old_cre, new_step_log+step_scale_n_shift);
+    delta_x_int=position.worker->toRound(old_cre);
     delta_x_int-=(new_width/2)<<step_scale_n_shift;
   }
 
-  MandelMath::number::Type ntype=position.center_re_n.ntype();
   for (int newy=0; newy<new_height; newy++)
   {
     int oldy;
@@ -308,33 +317,11 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
         oldx=-1;//call reset() in the second loop, we may still need the points  =imageWidth;
       if ((oldy>newy) || ((oldy==newy) && (oldx>newx)))
       {
-        switch (ntype)
-        {
-          case MandelMath::number::Type::typeEmpty:
-          case MandelMath::number::Type::typeDouble:
-          {
-            if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-              new_store[newy*new_width+newx].assign_double(old_store[oldy*old_width+oldx]);
-            else
-              new_store[newy*new_width+newx].zero(ntype);
-          } break;
-          case MandelMath::number::Type::typeDDouble:
-          {
-            if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-              new_store[newy*new_width+newx].assign_ddouble(old_store[oldy*old_width+oldx]);
-            else
-              new_store[newy*new_width+newx].zero(ntype);
-          } break;
-          case MandelMath::number::Type::typeMulti:
-          {
-            if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-              new_store[newy*new_width+newx].assign_multi(old_store[oldy*old_width+oldx]);
-            else
-              new_store[newy*new_width+newx].zero(ntype);
-          } break;
-        }
-
-      }
+        if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
+          new_store[newy*new_width+newx].assign(position.worker, old_store[oldy*old_width+oldx]);
+        else
+          new_store[newy*new_width+newx].zero(position.worker);
+      };
     }
   }
   for (int newy=(new_height-1)&0xfffffff; newy>=0; newy--) //avoid Clang warning about newy possibly ~ 2^31
@@ -353,31 +340,10 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
         oldx=-1;
       if ((oldy<newy) || ((oldy==newy) && (oldx<=newx)))
       {
-        switch (ntype)
-        {
-          case MandelMath::number::Type::typeEmpty:
-          case MandelMath::number::Type::typeDouble:
-          {
-            if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-              new_store[newy*new_width+newx].assign_double(old_store[oldy*old_width+oldx]);
-            else
-              new_store[newy*new_width+newx].zero(ntype);
-          } break;
-          case MandelMath::number::Type::typeDDouble:
-          {
-            if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-              new_store[newy*new_width+newx].assign_ddouble(old_store[oldy*old_width+oldx]);
-            else
-              new_store[newy*new_width+newx].zero(ntype);
-          } break;
-          case MandelMath::number::Type::typeMulti:
-          {
-            if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-              new_store[newy*new_width+newx].assign_multi(old_store[oldy*old_width+oldx]);
-            else
-              new_store[newy*new_width+newx].zero(ntype);
-          } break;
-        }
+        if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
+          new_store[newy*new_width+newx].assign(position.worker, old_store[oldy*old_width+oldx]);
+        else
+          new_store[newy*new_width+newx].zero(position.worker);
       }
     }
   }
@@ -385,15 +351,21 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
 
 void MandelModel::setView(double c_re, double c_im, double scale)
 {
-  MandelMath::number_any old_cre_n(&position.center_re_n);
-  MandelMath::number_any old_cim_n(&position.center_im_n);
+  MandelMath::number_store old_cre_s, old_cim_s;
+  position.worker->init(&old_cre_s);
+  position.worker->init(&old_cim_s);
+  position.worker->assign(&old_cre_s, &position.center_re_s);
+  position.worker->assign(&old_cim_s, &position.center_im_s);
   int old_step_log=position.step_log;
 
   position.setView(c_re, c_im, scale);
 
-  transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
-                 pointStore, imageWidth, imageHeight, position.center_re_n.impl->store, position.center_im_n.impl->store,
+  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
+                 pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
                  position.step_log-old_step_log, position.step_log);
+
+  position.worker->cleanup(&old_cim_s);
+  position.worker->cleanup(&old_cre_s);
 
   startNewEpoch();
 }
@@ -401,32 +373,44 @@ void MandelModel::setView(double c_re, double c_im, double scale)
 void MandelModel::drag(double delta_x, double delta_y)
 {
   //qDebug()<<"drag ("<<delta_x<<","<<delta_y<<")";
-  MandelMath::number_any old_cre_n(&position.center_re_n);
-  MandelMath::number_any old_cim_n(&position.center_im_n);
+  MandelMath::number_store old_cre_s, old_cim_s;
+  position.worker->init(&old_cre_s);
+  position.worker->init(&old_cim_s);
+  position.worker->assign(&old_cre_s, &position.center_re_s);
+  position.worker->assign(&old_cim_s, &position.center_im_s);
 
   int dx=qRound(delta_x);
   int dy=qRound(delta_y);
   position.move(dx, dy);
-  qDebug()<<"new c: re="<<position.center_re_n.impl->toString()<<",im="<<position.center_im_n.impl->toString();
+  qDebug()<<"new c: re="<<position.worker->toString(&position.center_re_s)<<",im="<<position.worker->toString(&position.center_im_s);
 
-  transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
-                 pointStore, imageWidth, imageHeight, position.center_re_n.impl->store, position.center_im_n.impl->store,
+  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
+                 pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
                  0, position.step_log);
+
+  position.worker->cleanup(&old_cim_s);
+  position.worker->cleanup(&old_cre_s);
 
   startNewEpoch();
 }
 
 void MandelModel::zoom(double x, double y, int inlog)
 {
-  MandelMath::number_any old_cre_n(&position.center_re_n);
-  MandelMath::number_any old_cim_n(&position.center_im_n);
+  MandelMath::number_store old_cre_s, old_cim_s;
+  position.worker->init(&old_cre_s);
+  position.worker->init(&old_cim_s);
+  position.worker->assign(&old_cre_s, &position.center_re_s);
+  position.worker->assign(&old_cim_s, &position.center_im_s);
   int old_step_log=position.step_log;
 
   position.scale(inlog, qRound(x)-imageWidth/2, imageHeight/2-qRound(y));
 
-  transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
-                 pointStore, imageWidth, imageHeight, position.center_re_n.impl->store, position.center_im_n.impl->store,
+  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
+                 pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
                  position.step_log-old_step_log, position.step_log);
+
+  position.worker->cleanup(&old_cim_s);
+  position.worker->cleanup(&old_cre_s);
 
   startNewEpoch();
 }
@@ -439,19 +423,24 @@ void MandelModel::setImageSize(int width, int height)
     return;
   int newLength=width*height;
   MandelPoint *newStore=new MandelPoint[newLength];
-  MandelMath::number::Type ntype=position.center_re_n.ntype();
   for (int i=0; i<newLength; i++)
-    newStore[i].init(ntype);
+    newStore[i].init(position.worker);
 
-  MandelMath::number_any old_cre_n(&position.center_re_n);
-  MandelMath::number_any old_cim_n(&position.center_im_n);
+  MandelMath::number_store old_cre_s, old_cim_s;
+  position.worker->init(&old_cre_s);
+  position.worker->init(&old_cim_s);
+  position.worker->assign(&old_cre_s, &position.center_re_s);
+  position.worker->assign(&old_cim_s, &position.center_im_s);
 
-  transformStore(pointStore, imageWidth, imageHeight, old_cre_n.impl, old_cim_n.impl,
-                 newStore, width, height, position.center_re_n.impl->store, position.center_im_n.impl->store,
+  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
+                 newStore, width, height, &position.center_re_s, &position.center_im_s,
                  0, position.step_log);
 
+  position.worker->cleanup(&old_cim_s);
+  position.worker->cleanup(&old_cre_s);
+
   for (int i=imageWidth*imageHeight-1; i>=0; i--)
-    pointStore[i].cleanup(ntype);
+    pointStore[i].cleanup(position.worker);
   delete[] pointStore;
   pointStore=newStore;
   imageWidth=width;
@@ -522,7 +511,7 @@ void MandelModel::writeToImage(ShareableImageWrapper image)
   //return result;
 }
 
-void MandelModel::giveWork(MandelEvaluator *worker)
+void MandelModel::giveWork(MandelEvaluator *evaluator)
 {
   int retryEffortFrom=0;
   while (retryEffortFrom>=0)
@@ -544,9 +533,9 @@ void MandelModel::giveWork(MandelEvaluator *worker)
               found=true;
               break;
             };
-          if (worker->currentParams.pixelIndex!=-1)
+          if (evaluator->currentParams.pixelIndex!=-1)
             dbgPoint();
-          assert(worker->currentParams.pixelIndex==-1);
+          assert(evaluator->currentParams.pixelIndex==-1);
           if (!found)
           {
             int phasex=(pointIndex%imageWidth-imageWidth/2+position.cached_center_re_mod+32768)%32768;
@@ -558,8 +547,8 @@ void MandelModel::giveWork(MandelEvaluator *worker)
             effort+=effortBonus;
             if (effort>=MAX_EFFORT)
               effort=MAX_EFFORT;
-            worker->currentParams.maxiter=1<<effort;
-            if (pointData->iter>=worker->currentParams.maxiter)
+            evaluator->currentParams.maxiter=1<<effort;
+            if (pointData->iter>=evaluator->currentParams.maxiter)
             {
               if (effort>=MAX_EFFORT)
                 pointData->state=MandelPoint::State::stMaxIter;
@@ -568,21 +557,21 @@ void MandelModel::giveWork(MandelEvaluator *worker)
             }
             else
             {
-              worker->switchType(position.center_re_n.ntype());
-              position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, &worker->currentParams.cr_n);
-              position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &worker->currentParams.ci_n);
-              worker->currentParams.epoch=epoch;
-              worker->currentParams.pixelIndex=pointIndex;
-              if (worker->startCompute(pointData, quickrun>=1000))
+              evaluator->switchType(position.worker);
+              position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, &evaluator->currentParams.cr_s);
+              position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &evaluator->currentParams.ci_s);
+              evaluator->currentParams.epoch=epoch;
+              evaluator->currentParams.pixelIndex=pointIndex;
+              if (evaluator->startCompute(pointData, quickrun>=1000))
               //if (worker->startCompute(pointData, true))
               {
-                worker->timeOuter.start();
+                evaluator->timeOuter.start();
                 lastGivenPointIndex_=pointIndex;
                 return;
               }
               else
               {
-                donePixel1(worker);
+                donePixel1(evaluator);
                 quickrun++;
               }
             }
@@ -609,20 +598,10 @@ void MandelModel::donePixel1(MandelEvaluator *me)
       qDebug()<<"Finished pixel finished again";
     else
     {
-      switch (position.center_re_n.ntype())
-      {
-        case MandelMath::number::Type::typeDouble:
-          point->assign_double(me->currentData);
-          break;
-        case MandelMath::number::Type::typeDDouble:
-          point->assign_ddouble(me->currentData);
-          break;
-        case MandelMath::number::Type::typeMulti:
-          point->assign_multi(me->currentData);
-          break;
-        case MandelMath::number::Type::typeEmpty:
-          dbgPoint();
-      }
+      if (position.worker==nullptr)
+        dbgPoint();
+      else
+        point->assign(position.worker, me->currentData);
       if ((point->state==MandelPoint::State::stUnknown) &&
           (point->iter>=(1<<MAX_EFFORT)))
         point->state=MandelPoint::State::stMaxIter;
@@ -643,40 +622,69 @@ void MandelModel::donePixel(MandelEvaluator *me)
 }
 
 MandelModel::Position::Position():
-  center_re_n(),
-  center_im_n()
+  worker(nullptr),
+  center_re_s(),
+  center_im_s()
 {
-  center_re_n.reinit(MandelMath::number::Type::typeDouble);
-  center_im_n.reinit(MandelMath::number::Type::typeDouble);
+  worker=&number_worker_double_template;
+  worker->init(&center_re_s, -0.5);
+  worker->init(&center_im_s, 0.0);
   //center_re_n.reinit(MandelMath::number::Type::typeDDouble);
   //center_im_n.reinit(MandelMath::number::Type::typeDDouble);
-  center_re_n.impl->zero(-0.5);
-  center_im_n.impl->zero(0);
   step_log=7;
   step_size__=1.0/128;
   updateCachedDepth();
 }
 
-void MandelModel::Position::setNumberType(MandelMath::number::Type ntype)
+MandelModel::Position::~Position()
 {
-  center_re_n.reinit(ntype);
-  center_im_n.reinit(ntype);
+  if (worker!=nullptr)
+  {
+    worker->cleanup(&center_re_s);
+    worker->cleanup(&center_im_s);
+  };
+}
+
+void MandelModel::Position::setNumberType(MandelMath::number_worker::Type ntype)
+{
+  //TODO: try to convert old value to new
+  worker->cleanup(&center_re_s);
+  worker->cleanup(&center_im_s);
+  switch (ntype)
+  {
+    case MandelMath::number_worker::Type::typeDouble:
+      worker=&number_worker_double_template;
+      break;
+    case MandelMath::number_worker::Type::typeDDouble:
+      worker=&number_worker_ddouble_template;
+      break;
+    case MandelMath::number_worker::Type::typeMulti:
+      worker=&number_worker_multi_template;
+      break;
+    case MandelMath::number_worker::Type::typeEmpty:
+      worker=nullptr;
+  }
+  if (worker)
+  {
+    worker->init(&center_re_s);
+    worker->init(&center_im_s);
+  };
 }
 
 void MandelModel::Position::setView(double c_re, double c_im, double scale)
 {
   step_log=-ilogb(scale);
   step_size__=ldexp(1.0, -step_log);
-  center_re_n.impl->zero(ldexp(round(ldexp(c_re, step_log)), -step_log));
-  center_im_n.impl->zero(ldexp(round(ldexp(c_im, step_log)), -step_log));
+  worker->zero(&center_re_s, ldexp(round(ldexp(c_re, step_log)), -step_log));
+  worker->zero(&center_im_s, ldexp(round(ldexp(c_im, step_log)), -step_log));
   updateCachedDepth();
 }
 
 void MandelModel::Position::move(int delta_x, int delta_y)
 {
   //qDebug()<<"move ("<<delta_x<<","<<delta_y<<")";
-  center_re_n.impl->add_double(-delta_x*step_size__);
-  center_im_n.impl->add_double(+delta_y*step_size__);
+  worker->add_double(&center_re_s, -delta_x*step_size__);
+  worker->add_double(&center_im_s, +delta_y*step_size__);
   cached_center_re_mod=(cached_center_re_mod-delta_x+32768)%32768;
   cached_center_im_mod=(cached_center_im_mod+delta_y+32768)%32768;
   int ccrm=cached_center_re_mod;
@@ -707,8 +715,8 @@ void MandelModel::Position::scale(int inlog, int center_x, int center_y)
     {
       step_size__/=2;
     }
-    center_re_n.impl->add_double(center_x*(old_step_size-step_size__));
-    center_im_n.impl->add_double(center_y*(old_step_size-step_size__));
+    worker->add_double(&center_re_s, center_x*(old_step_size-step_size__));
+    worker->add_double(&center_im_s, center_y*(old_step_size-step_size__));
     //center_re/step_size=center_re/old_step_size*old_step_size/step_size+center_x*(old_step_size-step_size)/step_size;
     cached_center_re_mod=cached_center_re_mod*(1<<inlog)+center_x*((1<<inlog)-1);
     cached_center_re_mod&=0x7fff;//=(cached_center_re_mod+32768)%32768;
@@ -734,8 +742,8 @@ void MandelModel::Position::scale(int inlog, int center_x, int center_y)
     {
       step_size__*=2;
     }
-    center_re_n.impl->add_double((center_x-adjust_x)*(old_step_size-step_size__)); //(old_step_size-step_size__)=(1-(1<<-inlog))*old_step_size
-    center_im_n.impl->add_double((center_y-adjust_y)*(old_step_size-step_size__));
+    worker->add_double(&center_re_s, (center_x-adjust_x)*(old_step_size-step_size__)); //(old_step_size-step_size__)=(1-(1<<-inlog))*old_step_size
+    worker->add_double(&center_im_s, (center_y-adjust_y)*(old_step_size-step_size__));
     //need to roll in high bits anyway
     /*cached_center_re_mod=cached_center_re_mod*(old_step_size/step_size)+(center_x-adjust_y)*(old_step_size/step_size-1);
     cached_center_re_mod%=32768;
@@ -748,33 +756,39 @@ void MandelModel::Position::scale(int inlog, int center_x, int center_y)
 void MandelModel::Position::updateCachedDepth()
 {
   //number_any d_re_n(MandelMath::number_store::DbgType::typeEmpty, &d_re_s);
-  MandelMath::number_any d_re_n(&center_re_n);
-  d_re_n.impl->lshift_(step_log-15);
-  d_re_n.impl->frac_pos();
-  d_re_n.impl->lshift_(15);
-  cached_center_re_mod=d_re_n.impl->toRound();
+  MandelMath::number_store d_re_s;
+  worker->init(&d_re_s);
+  worker->assign(&d_re_s, &center_re_s);
+  worker->lshift_(&d_re_s, step_log-15);
+  worker->frac_pos(&d_re_s);
+  worker->lshift_(&d_re_s, 15);
+  cached_center_re_mod=worker->toRound(&d_re_s);
+  worker->cleanup(&d_re_s);
 
-  MandelMath::number_any d_im_n(&center_im_n);
-  d_im_n.impl->lshift_(step_log-15);
-  d_im_n.impl->frac_pos();
-  d_im_n.impl->lshift_(15);
-  cached_center_im_mod=d_im_n.impl->toRound();
+  MandelMath::number_store d_im_s;
+  worker->init(&d_im_s);
+  worker->assign(&d_im_s, &center_im_s);
+  worker->lshift_(&d_im_s, step_log-15);
+  worker->frac_pos(&d_im_s);
+  worker->lshift_(&d_im_s, 15);
+  cached_center_im_mod=worker->toRound(&d_im_s);
+  worker->cleanup(&d_im_s);
 }
 
-void MandelModel::Position::pixelXtoRE(int x, MandelMath::number_any *result)
+void MandelModel::Position::pixelXtoRE(int x, MandelMath::number_store *result)
 {
   //return (x - imageWidth/2)*position.step_size+position.center_re;
   //should be already result->reinit(center_re_n.ntype());
-  result->impl->assign(center_re_n.impl->store);
-  result->impl->add_double(x*step_size__);
+  worker->assign(result, &center_re_s);
+  worker->add_double(result, x*step_size__);
 }
 
-void MandelModel::Position::pixelYtoIM(int y, MandelMath::number_any *result)
+void MandelModel::Position::pixelYtoIM(int y, MandelMath::number_store *result)
 {
   //return (y - imageHeight/2)*position.step_size+position.center_im;
   //should be already result->reinit(center_im_n.ntype());
-  result->impl->assign(center_im_n.impl->store);
-  result->impl->add_double(y*step_size__);
+  worker->assign(result, &center_im_s);
+  worker->add_double(result, y*step_size__);
 }
 
 
