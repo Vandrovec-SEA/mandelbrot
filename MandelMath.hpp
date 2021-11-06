@@ -77,21 +77,9 @@ public:
   number_store();
   ~number_store();
   void cleanup(number::Type ntype);
-  void cleanup_double_();
-  void cleanup_ddouble_();
-  void cleanup_multi_();
   void init(number::Type ntype, double val=0);
-  void init_double_(double val=0); //should already be switched to empty
-  void init_ddouble_(double val=0); //should already be switched to empty
-  void init_multi_(double val=0); //should already be switched to empty
   void zero(number::Type ntype, double val=0);
-  void zero_double_(double val=0); //should already be switched to double
-  void zero_ddouble_(double val=0); //should already be switched to ddouble
-  void zero_multi_(double val=0); //should already be switched to multi
   template <class T> void assign(const number_store &other);
-  void assign_double(const number_store &other);
-  void assign_ddouble(const number_store &other);
-  void assign_multi(const number_store &other);
   void assignTo_double(number_store &other);
   void assignTo_ddouble(number_store &other);
   void assignTo_multi(number_store &other);
@@ -115,9 +103,9 @@ public:
   QString toString() override;
   void init(double val=0) override;
   void zero(double val=0) override;
-  void assign(const number_store *src) override { store->assign_double(*src); };
+  void assign(const number_store *src) override { store->assign<number_double>(*src); };
   void assignTo(number_store *src) override { store->assignTo_double(*src); };
-  void cleanup() override { store->cleanup_double_(); }
+  void cleanup() override { store->cleanup(Type::typeDouble); }
   void lshift_(int shoft) override;
   void frac_pos() override;
   void add_double(double x) override;
@@ -140,9 +128,9 @@ public:
   QString toString() override;
   void init(double val=0) override;
   void zero(double val=0) override;
-  void assign(const number_store *src) override { store->assign_ddouble(*src); };
+  void assign(const number_store *src) override { store->assign<number_ddouble>(*src); };
   void assignTo(number_store *src) override { store->assignTo_ddouble(*src); };
-  void cleanup() override { store->cleanup_ddouble_(); }
+  void cleanup() override { store->cleanup(Type::typeDDouble); }
   void lshift_(int shoft) override;
   void frac_pos() override;
   void add_double(double x) override;
@@ -165,9 +153,9 @@ public:
   QString toString() override;
   void init(double val=0) override;
   void zero(double val=0) override;
-  void assign(const number_store *src) override { store->assign_multi(*src); };;
+  void assign(const number_store *src) override { store->assign<number_multi>(*src); };;
   void assignTo(number_store *src) override { store->assignTo_multi(*src); };;
-  void cleanup() override { store->cleanup_multi_(); }
+  void cleanup() override { store->cleanup(Type::typeMulti); }
   void lshift_(int shoft) override;
   void frac_pos() override;
   void add_double(double x) override;

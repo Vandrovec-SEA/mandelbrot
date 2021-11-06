@@ -47,102 +47,82 @@ void number_store::cleanup(number::Type ntype)
 {
   switch (ntype)
   {
-    case number::Type::typeDouble: cleanup_double_(); break;
-    case number::Type::typeDDouble: cleanup_ddouble_(); break;
-    case number::Type::typeMulti: cleanup_multi_(); break;
+    case number::Type::typeDouble:
+      assert(dbgType==number::Type::typeDouble);
+      dbgType=number::Type::typeEmpty;
+      as.doubl=0.0;
+      break;
+    case number::Type::typeDDouble:
+      assert(dbgType==number::Type::typeDDouble);
+      dbgType=number::Type::typeEmpty;
+      as.ddouble_.deinit();
+      break;
+    case number::Type::typeMulti:
+      assert(dbgType==number::Type::typeMulti);
+      dbgType=number::Type::typeEmpty;
+      as.multi_.deinit();
+      break;
     case number::Type::typeEmpty: ;
   }
-}
-
-void number_store::cleanup_double_()
-{
-  assert(dbgType==number::Type::typeDouble);
-  dbgType=number::Type::typeEmpty;
-  as.doubl=0.0;
-}
-
-void number_store::cleanup_ddouble_()
-{
-  assert(dbgType==number::Type::typeDDouble);
-  dbgType=number::Type::typeEmpty;
-  as.ddouble_.deinit();
-}
-
-void number_store::cleanup_multi_()
-{
-  assert(dbgType==number::Type::typeMulti);
-  dbgType=number::Type::typeEmpty;
-  as.multi_.deinit();
 }
 
 void number_store::init(number::Type ntype, double val)
 {
   switch (ntype)
   {
-    case number::Type::typeDouble: init_double_(val); break;
-    case number::Type::typeDDouble: init_ddouble_(val); break;
-    case number::Type::typeMulti: init_multi_(val); break;
+    case number::Type::typeDouble:
+      assert(dbgType==number::Type::typeEmpty);
+      dbgType=number::Type::typeDouble;
+      as.doubl=val;
+      break;
+    case number::Type::typeDDouble:
+      assert(dbgType==number::Type::typeEmpty);
+      dbgType=number::Type::typeDDouble;
+      as.ddouble_.init();
+      as.ddouble_.dd->hi=val;
+      as.ddouble_.dd->lo=0.0;
+      break;
+    case number::Type::typeMulti:
+      assert(dbgType==number::Type::typeEmpty);
+      dbgType=number::Type::typeMulti;
+      as.multi_.init();
+      as.multi_.bytes->set(val);
+      break;
     case number::Type::typeEmpty: ;
   }
-}
-
-void number_store::init_double_(double val)
-{
-  assert(dbgType==number::Type::typeEmpty);
-  dbgType=number::Type::typeDouble;
-  as.doubl=val;
-}
-
-void number_store::init_ddouble_(double val)
-{
-  assert(dbgType==number::Type::typeEmpty);
-  dbgType=number::Type::typeDDouble;
-  as.ddouble_.init();
-  as.ddouble_.dd->hi=val;
-  as.ddouble_.dd->lo=0.0;
-}
-
-void number_store::init_multi_(double val)
-{
-  assert(dbgType==number::Type::typeEmpty);
-  dbgType=number::Type::typeMulti;
-  as.multi_.init();
-  as.multi_.bytes->set(val);
 }
 
 void number_store::zero(number::Type ntype, double val)
 {
   switch (ntype)
   {
-    case number::Type::typeDouble: zero_double_(val); break;
-    case number::Type::typeDDouble: zero_ddouble_(val); break;
-    case number::Type::typeMulti: zero_multi_(val); break;
+    case number::Type::typeDouble:
+      assert(dbgType==number::Type::typeDouble);
+      as.doubl=val;
+      break;
+    case number::Type::typeDDouble:
+      assert(dbgType==number::Type::typeDDouble);
+      as.ddouble_.dd->hi=val;
+      as.ddouble_.dd->lo=0.0;
+      break;
+    case number::Type::typeMulti:
+      assert(dbgType==number::Type::typeMulti);
+      as.multi_.bytes->set(val);
+      break;
     case number::Type::typeEmpty: ;
   }
 }
 
-void number_store::zero_double_(double val)
+template <class T>
+void number_store::assign(const number_store &other)
 {
-  assert(dbgType==number::Type::typeDouble);
+  assert(other.dbgType==number_to_type<T>::ntype);
+  assert(dbgType==number_to_type<T>::ntype);
   //dbgType=number::Type::typeDouble;
-  as.doubl=val;
+  as.doubl=other.as.doubl;
 }
 
-void number_store::zero_ddouble_(double val)
-{
-  assert(dbgType==number::Type::typeDDouble);
-  //dbgType=number::Type::typeDDouble;
-  as.ddouble_.dd->hi=val;
-  as.ddouble_.dd->lo=0.0;
-}
-
-void number_store::zero_multi_(double val)
-{
-  assert(dbgType==number::Type::typeMulti);
-  //dbgType=number::Type::typeMulti;
-  as.multi_.bytes->set(val);
-}
-
+/*
 template <>
 void number_store::assign<number_double>(const number_store &other)
 {
@@ -170,31 +150,7 @@ void number_store::assign<number_multi>(const number_store &other)
   //dbgType=number::Type::typeMulti;
   *as.multi_.bytes=*other.as.multi_.bytes;
 }
-
-void number_store::assign_double(const number_store &other)
-{
-  assert(other.dbgType==number::Type::typeDouble);
-  assert(dbgType==number::Type::typeDouble);
-  //dbgType=number::Type::typeDouble;
-  as.doubl=other.as.doubl;
-}
-
-void number_store::assign_ddouble(const number_store &other)
-{
-  assert(other.dbgType==number::Type::typeDDouble);
-  assert(dbgType==number::Type::typeDDouble);
-  //dbgType=number::Type::typeDDouble;
-  //as.ddouble_.dd->assign(*other.as.ddouble_.dd);
-  *as.ddouble_.dd=*other.as.ddouble_.dd;
-}
-
-void number_store::assign_multi(const number_store &other)
-{
-  assert(other.dbgType==number::Type::typeMulti);
-  assert(dbgType==number::Type::typeMulti);
-  //dbgType=number::Type::typeMulti;
-  *as.multi_.bytes=*other.as.multi_.bytes;
-}
+*/
 
 void number_store::assignTo_double(number_store &other)
 {
@@ -231,12 +187,12 @@ QString number_double::toString()
 
 void number_double::init(double val)
 {
-  store->init_double_(val);
+  store->init(number::Type::typeDouble, val);
 }
 
 void number_double::zero(double val)
 {
-  store->zero_double_(val);
+  store->zero(number::Type::typeDouble, val);
 }
 
 void number_double::lshift_(int shoft)
@@ -317,12 +273,12 @@ QString number_ddouble::toString()
 
 void number_ddouble::init(double val)
 {
-  store->init_ddouble_(val);
+  store->init(number::Type::typeDDouble, val);
 }
 
 void number_ddouble::zero(double val)
 {
-  store->zero_ddouble_(val);
+  store->zero(number::Type::typeDDouble, val);
 }
 
 void number_ddouble::lshift_(int shoft)
@@ -401,12 +357,12 @@ QString number_multi::toString()
 
 void number_multi::init(double val)
 {
-  store->init_multi_(val);
+  store->init(number::Type::typeMulti, val);
 }
 
 void number_multi::zero(double val)
 {
-  store->zero_multi_(val);
+  store->zero(number::Type::typeMulti, val);
 }
 
 void number_multi::lshift_(int shoft)

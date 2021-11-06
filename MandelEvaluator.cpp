@@ -21,15 +21,15 @@ MandelMath::number_any::number_any(number_any *src):
   {
     case MandelMath::number::Type::typeDouble:
     {
-      my_store.assign_double(*src->impl->store);
+      my_store.assign<number_double>(*src->impl->store);
     } break;
     case MandelMath::number::Type::typeDDouble:
     {
-      my_store.assign_ddouble(*src->impl->store);
+      my_store.assign<number_ddouble>(*src->impl->store);
     } break;
     case MandelMath::number::Type::typeMulti:
     {
-      my_store.assign_multi(*src->impl->store);
+      my_store.assign<number_multi>(*src->impl->store);
     } break;
     case MandelMath::number::Type::typeEmpty:
     {
@@ -130,24 +130,24 @@ MandelPoint::MandelPoint(): zr_(), zi_()
 
 void MandelPoint::assign_double(const MandelPoint &src)
 {
-  zr_.assign_double(src.zr_);
-  zi_.assign_double(src.zi_);
+  zr_.assign<MandelMath::number_double>(src.zr_);
+  zi_.assign<MandelMath::number_double>(src.zi_);
   state=src.state;
   iter=src.iter;
 }
 
 void MandelPoint::assign_ddouble(const MandelPoint &src)
 {
-  zr_.assign_ddouble(src.zr_);
-  zi_.assign_ddouble(src.zi_);
+  zr_.assign<MandelMath::number_ddouble>(src.zr_);
+  zi_.assign<MandelMath::number_ddouble>(src.zi_);
   state=src.state;
   iter=src.iter;
 }
 
 void MandelPoint::assign_multi(const MandelPoint &src)
 {
-  zr_.assign_multi(src.zr_);
-  zi_.assign_multi(src.zi_);
+  zr_.assign<MandelMath::number_multi>(src.zr_);
+  zi_.assign<MandelMath::number_multi>(src.zi_);
   state=src.state;
   iter=src.iter;
 }
@@ -197,29 +197,6 @@ MandelEvaluator::MandelEvaluator(): QThread(nullptr),
 MandelEvaluator::~MandelEvaluator()
 {
   switchType(MandelMath::number::Type::typeEmpty);
-  //data_zi_n won't autoclean because the store is external
-  /*switch (currentParams.cr_n.ntype())
-  {
-    case MandelMath::number::Type::typeDouble:
-    {
-      data_zr_s.cleanup_double_();
-      data_zi_s.cleanup_double_();
-    } break;
-    case MandelMath::number::Type::typeDDouble:
-    {
-      data_zr_s.cleanup_ddouble_();
-      data_zi_s.cleanup_ddouble_();
-    } break;
-    case MandelMath::number::Type::typeMulti:
-    {
-      data_zr_s.cleanup_multi_();
-      data_zi_s.cleanup_multi_();
-    } break;
-    case MandelMath::number::Type::typeEmpty: ;
-  }
-
-  currentParams.cr_n.reinit(MandelMath::number::Type::typeEmpty);
-  currentParams.ci_n.reinit(MandelMath::number::Type::typeEmpty);*/
 }
 
 void MandelEvaluator::simple_double(double cr, double ci, MandelPoint &data, int maxiter)
