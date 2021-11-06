@@ -8,14 +8,11 @@
 
 namespace MandelMath
 {
-
+/*
 struct number_any
 {
 protected:
   number_store my_store;
-  /*number_worker_double d;
-  number_worker_ddouble dd;
-  number_worker_multi m;*/
 public:
   //number_any(MandelMath::number_store::DbgType ntype, MandelMath::number_store *src);
   number_any();
@@ -27,7 +24,7 @@ public:
   void reinit(number_worker *worker);
   number_worker *ntype_();
 };
-
+*/
 } //namespace MandelMath
 
 struct MandelPoint
@@ -88,6 +85,9 @@ public:
 
   bool startCompute(const MandelPoint *data, bool no_quick_route);
 protected:
+#if COMPLEX_IS_TEMPLATE
+  template <class NW>
+#endif
   void evaluate();
 protected slots:
   void doCompute();

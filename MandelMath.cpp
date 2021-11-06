@@ -2,6 +2,8 @@
 
 #include <cassert>
 #include <cmath>
+//#define assert(x) { if (!(x)) dbgPoint(); }
+//#define assert(x) { }
 
 void doNothing(int &x)
 {
@@ -459,7 +461,7 @@ double number_worker_multi::toDouble(const number_store *store)
 }
 
 
-
+#if !COMPLEX_IS_TEMPLATE
 
 const number_store *complex::getMagTmp()
 {
@@ -513,5 +515,67 @@ void complex::sqr()
   worker->sqr(re_s);
   worker->sub(re_s, &tmp1_s);
 }
+
+#else //COMPLEX_IS_TEMPLATE
+
+template <class NW>
+const number_store *complex<NW>::getMagTmp()
+{
+  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  worker.assign(&tmp1_s, re_s);
+  worker.sqr(&tmp1_s);
+  worker.assign(&tmp2_s, im_s);
+  worker.sqr(&tmp2_s);
+  worker.add(&tmp1_s, &tmp2_s);
+  return &tmp1_s;
+}
+
+template <class NW>
+void complex<NW>::add(const complex<NW> *other)
+{
+  assert(other->re_s);
+  assert(other->im_s);
+  worker.add(re_s, other->re_s);
+  worker.add(im_s, other->im_s);
+}
+
+template <class NW>
+void complex<NW>::mul(const complex<NW> *other)
+{
+  //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  //r:=r1*r2-i1*i2
+  //i:=r1*i2+i1*r2
+  worker.assign(&tmp1_s, re_s);
+  worker.mul(&tmp1_s, other->re_s);
+  worker.assign(&tmp2_s, im_s);
+  worker.mul(&tmp2_s, other->im_s);
+  worker.sub(&tmp1_s, &tmp2_s);
+  worker.assign(&tmp2_s, other->re_s);
+  worker.mul(re_s, other->im_s);
+  worker.mul(im_s, &tmp2_s);
+  worker.add(im_s, re_s);
+  worker.assign(re_s, &tmp1_s);
+}
+
+template <class NW>
+void complex<NW>::sqr()
+{
+  //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  //r:=r*r-i*i
+  //i=2*r*i
+  worker.assign(&tmp1_s, im_s);
+  worker.sqr(&tmp1_s);
+  worker.mul(im_s, re_s);
+  worker.lshift_(im_s, 1);
+  worker.sqr(re_s);
+  worker.sub(re_s, &tmp1_s);
+}
+#endif //COMPLEX_IS_TEMPLATE
 
 } // namespace MandelMath

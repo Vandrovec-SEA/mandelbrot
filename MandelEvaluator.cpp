@@ -1,6 +1,6 @@
 #include "MandelEvaluator.hpp"
 
-
+/*
 MandelMath::number_any::number_any():
   my_store(), impl(nullptr), store(&my_store)
 {
@@ -35,32 +35,6 @@ MandelMath::number_any::~number_any()
   impl=nullptr;
 }
 
-/*
-MandelMath::number_any::number_any(MandelMath::number_store::DbgType ntype, MandelMath::number_store *src):
-  d(src), dd(src), m(src)
-{
-  switch (ntype)
-  {
-    case MandelMath::number_store::DbgType::typeDouble:
-    {
-      impl=&d;
-    } break;
-    case MandelMath::number_store::DbgType::typeDDouble:
-    {
-      impl=&dd;
-    } break;
-    case MandelMath::number_store::DbgType::typeMulti:
-    {
-      impl=&m;
-    } break;
-    case MandelMath::number_store::DbgType::typeEmpty:
-    {
-      impl=nullptr;
-    } break;
-  }
-}
-*/
-
 void MandelMath::number_any::reinit(MandelMath::number_worker *worker)
 { //TODO: should try to convert old value to new type
   if (worker==impl)
@@ -76,7 +50,7 @@ MandelMath::number_worker *MandelMath::number_any::ntype_()
 {
   return impl;
 }
-
+*/
 
 
 MandelPoint::MandelPoint(): zr_(), zi_()
@@ -114,8 +88,11 @@ void MandelPoint::cleanup(MandelMath::number_worker *worker)
 {
   if (worker==nullptr)
     dbgPoint();
-  worker->cleanup(&zr_);
-  worker->cleanup(&zi_);
+  else
+  {
+    worker->cleanup(&zr_);
+    worker->cleanup(&zi_);
+  }
 }
 
 
@@ -228,6 +205,7 @@ void MandelEvaluator::switchType(MandelMath::number_worker *worker)
   currentWorker=worker;
 }
 
+#if !COMPLEX_IS_TEMPLATE
 bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
 {
   //currentParams=params;
@@ -295,6 +273,105 @@ void MandelEvaluator::doCompute()
   emit doneCompute(this);
 }
 
+#else
+bool MandelEvaluator::startCompute(const MandelPoint *data, bool no_quick_route)
+{
+  //currentParams=params;
+  /*data_zr_n.reinit(currentParams.cr_n.ntype());
+  data_zi_n.reinit(currentParams.ci_n.ntype());
+  data_z_tmp1.reinit(currentParams.cr_n.ntype());
+  data_z_tmp2.reinit(currentParams.cr_n.ntype());*/
+  if (currentWorker==nullptr)
+  {
+    dbgPoint();
+    currentData.state=MandelPoint::State::stMaxIter;
+    return false;
+  }
+  currentData.assign(currentWorker, *data);
+  if (!no_quick_route && (currentParams.maxiter-currentData.iter<=1000))
+  {
+    //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
+    switch (currentWorker->ntype())
+    {
+      case MandelMath::number_worker::Type::typeDouble:
+        evaluate<MandelMath::number_worker_double>();
+        break;
+      case MandelMath::number_worker::Type::typeDDouble:
+        evaluate<MandelMath::number_worker_ddouble>();
+        break;
+      case MandelMath::number_worker::Type::typeMulti:
+        evaluate<MandelMath::number_worker_multi>();
+        break;
+      case MandelMath::number_worker::Type::typeEmpty:
+        currentData.state=MandelPoint::State::stMaxIter;
+        break;
+    }
+    pointsComputed++;
+    return false;
+  };
+  timeInvoke.start();
+  QMetaObject::invokeMethod(this,
+                            &MandelEvaluator::doCompute,
+                            Qt::ConnectionType::QueuedConnection);
+  timeInvokePostTotal+=timeInvoke.nsecsElapsed();
+  return true;
+}
+
+template <class NW>
+void MandelEvaluator::evaluate()
+{
+  NW localWorker;
+  MandelMath::complex<NW> c(&currentParams.cr_s, &currentParams.ci_s, true);
+  MandelMath::complex<NW> z(&this->data_zr_s, &this->data_zi_s, true);
+  localWorker.assign(z.re_s, &currentData.zr_);
+  localWorker.assign(z.im_s, &currentData.zi_);
+  for (int iter=currentData.iter; iter<currentParams.maxiter; iter++)
+  {
+    const MandelMath::number_store *magtmp=z.getMagTmp();
+    if (localWorker.toDouble(magtmp)>4)
+    {
+      currentData.state=MandelPoint::State::stOutside;
+      currentData.iter=iter;
+      localWorker.assign(&currentData.zr_, z.re_s);
+      localWorker.assign(&currentData.zi_, z.im_s);
+      return;
+    };
+    z.sqr();
+    z.add(&c);
+  }
+  //data.state=MandelPoint::State::stMaxIter;
+  currentData.iter=currentParams.maxiter;
+  localWorker.assign(&currentData.zr_, z.re_s);
+  localWorker.assign(&currentData.zi_, z.im_s);
+}
+
+void MandelEvaluator::doCompute()
+{
+  timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
+  timeInner.start();
+  //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
+  switch (currentWorker->ntype())
+  {
+    case MandelMath::number_worker::Type::typeDouble:
+      evaluate<MandelMath::number_worker_double>();
+      break;
+    case MandelMath::number_worker::Type::typeDDouble:
+      evaluate<MandelMath::number_worker_ddouble>();
+      break;
+    case MandelMath::number_worker::Type::typeMulti:
+      evaluate<MandelMath::number_worker_multi>();
+      break;
+    case MandelMath::number_worker::Type::typeEmpty:
+      currentData.state=MandelPoint::State::stMaxIter;
+      break;
+  }
+  pointsComputed++;
+  //msleep(10);
+  timeInnerTotal+=timeInner.nsecsElapsed();
+  emit doneCompute(this);
+}
+
+#endif
 
 MandelEvaluator::ComputeParams::ComputeParams():
   cr_s(),

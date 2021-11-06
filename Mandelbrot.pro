@@ -6,6 +6,10 @@ CONFIG += c++11
 # In order to do so, uncomment the following line.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
+#helps with templated version but not much with virtual version
+QMAKE_CXXFLAGS_DEBUG += -O9
+QMAKE_CFLAGS_DEBUG += -O9
+
 SOURCES += \
         MandelEvaluator.cpp \
         MandelImageCombiner.cpp \

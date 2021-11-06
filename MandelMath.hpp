@@ -21,6 +21,7 @@ public:
   enum Type { typeEmpty, typeDouble, typeDDouble, typeMulti };
 
   number_worker() { }
+  virtual Type ntype() { return typeEmpty; }
   virtual void init(number_store *store, double val=0)=0;
   virtual void zero(number_store *store, double val=0)=0;
   virtual void assign(number_store *store, const number_store *src)=0;
@@ -99,6 +100,7 @@ public:
   number_worker_double() {}
   //{ assert((store->dbgType==Type::typeDouble) ||
   //         (store->dbgType==Type::typeEmpty)); }
+  virtual Type ntype() override { return typeDouble; }
   void init(number_store *store, double val=0) override;
   void zero(number_store *store, double val=0) override;
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_double>(*src); };
@@ -124,6 +126,7 @@ public:
   number_worker_ddouble() {}
   //{ assert((store->dbgType==Type::typeDDouble) ||
   //         (store->dbgType==Type::typeEmpty)); }
+  virtual Type ntype() override { return typeDDouble; }
   void init(number_store *store, double val=0) override;
   void zero(number_store *store, double val=0) override;
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_ddouble>(*src); };
@@ -149,6 +152,7 @@ public:
   number_worker_multi() {}
   //{ assert((store->dbgType==Type::typeMulti) ||
   //         (store->dbgType==Type::typeEmpty)); }
+  virtual Type ntype() override { return typeMulti; }
   void init(number_store *store, double val=0) override;
   void zero(number_store *store, double val=0) override;
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_multi>(*src); };;
@@ -167,7 +171,7 @@ public:
   int toRound(const number_store *store) override;
   double toDouble(const number_store *store) override;
 };
-
+/*
 template <class T> struct number_to_type
 {
 public:
@@ -180,7 +184,9 @@ template <> struct number_to_type<number_worker_ddouble>
 { static const number_worker::Type ntype=number_worker::Type::typeDDouble; };
 template <> struct number_to_type<number_worker_multi>
 { static const number_worker::Type ntype=number_worker::Type::typeMulti; };
-
+*/
+#define COMPLEX_IS_TEMPLATE 1 //virtual or templated class complex
+#if !COMPLEX_IS_TEMPLATE
 class complex
 {
   number_worker *worker;
@@ -212,7 +218,44 @@ public:
   void mul(const complex *other);
   void sqr();
 };
+#else //COMPLEX_IS_TEMPLATE
+template <class NW>
+class complex
+{
+  NW worker;
+  bool external_stores;
+  number_store tmp1_s;
+  number_store tmp2_s;
+public:
+  //complex(number *re, number *im, number *tmp1, number *tmp2): tmp1(tmp1), tmp2(tmp2), re(re), im(im) { }
+  complex(number_store *re_s, number_store *im_s, bool external_stores=false):
+    external_stores(external_stores), re_s(re_s), im_s(im_s)
+  {
+    worker.init(&tmp1_s);
+    worker.init(&tmp2_s);
+  }
+  ~complex()
+  {
+    worker.cleanup(&tmp2_s);
+    worker.cleanup(&tmp1_s);
+    if (!external_stores)
+    {
+      worker.cleanup(im_s);
+      worker.cleanup(re_s);
+    };
+  }
+  number_store *re_s;
+  number_store *im_s;
+  const number_store *getMagTmp();
+  void add(const complex *other);
+  void mul(const complex *other);
+  void sqr();
+};
+
+template class complex<number_worker_double>;
+template class complex<number_worker_ddouble>;
+template class complex<number_worker_multi>;
+#endif //COMPLEX_IS_TEMPLATE
 
 } // namespace MandelMath
-
 #endif // MANDELMATH_NUMBER_HPP
