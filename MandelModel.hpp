@@ -22,14 +22,36 @@ public:
   Q_INVOKABLE void setImageSize(int width, int height);
   void startNewEpoch();
   Q_INVOKABLE void writeToImage(ShareableImageWrapper img);
+  Q_INVOKABLE void paintOrbit(ShareableImageWrapper image, int x, int y);
   Q_INVOKABLE QString pixelXtoRE_str(int x);
   Q_INVOKABLE QString pixelYtoIM_str(int y);
   Q_INVOKABLE QString getTimes();
+  Q_INVOKABLE QString getTextXY();
+  Q_INVOKABLE QString getTextInfoGen();
+  Q_INVOKABLE QString getTextInfoSpec();
 
+  enum paintStyle
+  {
+    paintStyleKind=0,
+    paintStyleCls=1,
+    paintStyleExter=2,
+    paintStyleInter=3,
+    paintStyleNear=4
+  };
+  Q_ENUMS(paintStyle);
+  paintStyle _selectedPaintStyle;
+  Q_PROPERTY(paintStyle selectedPaintStyle READ getselectedPaintStyle WRITE setselectedPaintStyle NOTIFY selectedPaintStyleChanged)
+  paintStyle getselectedPaintStyle() { return _selectedPaintStyle; }
+  void setselectedPaintStyle(paintStyle ps) { _selectedPaintStyle=ps; }
+
+  QVector<int> periodToIndexCache;
+  int periodToIndex(int period);
   void giveWork(MandelEvaluator *worker);
   void donePixel1(MandelEvaluator *me);
 public slots:
   void donePixel(MandelEvaluator *me);
+signals:
+  void selectedPaintStyleChanged();
 protected:
   constexpr static int MAX_ZOOM_IN_DOUBLE=53;
   //MandelMath::number_store::DbgType currentMath;
@@ -39,7 +61,7 @@ protected:
   MandelPoint *pointStore;
   int lastGivenPointIndex_;
   int effortBonus;
-  constexpr static int MAX_EFFORT=18;
+  constexpr static int MAX_EFFORT=17;//18;
   int threadCount;
   MandelEvaluator *threads;
 
@@ -67,6 +89,12 @@ protected:
     void pixelXtoRE(int x, MandelMath::number_store *result);
     void pixelYtoIM(int y, MandelMath::number_store *result);
   } position;
+  struct
+  {
+    MandelMath::number_worker *worker;
+    MandelEvaluator evaluator;
+    MandelPoint pointData;
+  } orbit;
 };
 
 #endif // MANDELMODEL_H

@@ -53,9 +53,44 @@ void multiprec::sqr()
   mul(this);
 }
 
+void multiprec::recip()
+{
+}
+
+void multiprec::sqrt()
+{
+}
+
 int multiprec::round()
 {
   return 0;
+}
+
+bool multiprec::isequal(const multiprec *other)
+{
+  (void)other;
+  return true;
+}
+
+bool multiprec::is0()
+{
+  return false;
+}
+
+bool multiprec::isle(const multiprec *other)
+{
+  (void)other;
+  return false;
+}
+
+bool multiprec::isle0()
+{
+  return false;
+}
+
+bool multiprec::isl1()
+{
+  return false;
 }
 
 double multiprec::toDouble()

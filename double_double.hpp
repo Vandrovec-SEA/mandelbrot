@@ -24,6 +24,13 @@ public:
   void add(double h2, double l2);
   void mul(double h2, double l2);
   void sqr();
+  void recip();
+  void sqrt();
+  bool isequal(const dd_real *other);
+  bool is0();
+  bool isle(const dd_real *other);
+  bool isle0();
+  bool isl1();
 };
 
 } // namespace MandelMath

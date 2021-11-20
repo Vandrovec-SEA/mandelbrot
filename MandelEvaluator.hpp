@@ -30,13 +30,21 @@ public:
 struct MandelPoint
 {
   MandelPoint();
-  enum State { stUnknown, stOutside, stMaxIter } state;
-  MandelMath::number_store zr_, zi_;
+  enum State { stUnknown, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter } state;
+  MandelMath::number_store f_re, f_im;
+  MandelMath::number_store fc_c_re, fc_c_im; //fc_c, or fz_r if stPeriod2 or stPeriod3
+  MandelMath::number_store fz_c_mag;
+  int near0iter;
+  MandelMath::number_store near0f_re, near0f_im;
+  int period;
+  MandelMath::number_store root_re, root_im;
   int iter;
+  double exterior_hits, exterior_avoids; //upper and lower bound
+  double interior;
   MandelPoint &operator =(MandelPoint &src) = delete;
   void assign(MandelMath::number_worker *worker, const MandelPoint &src);
   void init(MandelMath::number_worker *worker);
-  void zero(MandelMath::number_worker *worker);
+  void zero(MandelMath::number_worker *worker, const MandelMath::number_store *c_re, const MandelMath::number_store *c_im);
   void cleanup(MandelMath::number_worker *worker);
 };
 
@@ -44,6 +52,9 @@ class MandelEvaluator: public QThread
 {
   Q_OBJECT
 public:
+  constexpr static double LARGE_FLOAT2=1e60;
+  constexpr static double MAGIC_MIN_SHRINK=1.5;
+  constexpr static int MAX_PERIOD=8000;
   MandelEvaluator();
   ~MandelEvaluator();
   static void simple_double(double cr, double ci, MandelPoint &data, int maxiter);
@@ -65,26 +76,55 @@ public:
 
   struct ComputeParams
   {
-    MandelMath::number_store cr_s;
-    MandelMath::number_store ci_s;
-    //MandelMath::number_any cr_n;
-    //MandelMath::number_any ci_n;
+    MandelMath::number_store c_re, c_im;
     int epoch;
     int pixelIndex;
     int maxiter;
     ComputeParams();
   } currentParams;
-
   MandelPoint currentData;
-  MandelMath::number_store data_zr_s;
-  MandelMath::number_store data_zi_s;
-  //MandelMath::number_any data_zr_n;
-  //MandelMath::number_any data_zi_n;
-  //MandelMath::number_any data_z_tmp1;
-  //MandelMath::number_any data_z_tmp2;
 
-  bool startCompute(const MandelPoint *data, bool no_quick_route);
+  bool startCompute_(const MandelPoint *data, int quick_route); //qr: -1..never 0..auto 1..always
 protected:
+  typedef MandelMath::complex complex;
+  struct
+  {
+    MandelMath::number_store fz_r_re, fz_r_im;
+    MandelMath::number_store near0fmag;
+    MandelMath::number_store lookper_startf_re, lookper_startf_im;
+    MandelMath::number_store lookper_bestf_re, lookper_bestf_im;
+    MandelMath::number_store lookper_near0f_re, lookper_near0f_im; //TODO: near0f->nearc
+    MandelMath::number_store lookper_near0f_dist;
+    MandelMath::number_store lookper_dist2;
+    int lookper_startiter, lookper_prevGuess, lookper_lastGuess;
+    MandelMath::number_store lookper_totalFzmag;
+  } eval;
+  struct
+  {
+    MandelMath::number_store bestr_re, bestr_im;
+    MandelMath::number_store f_r_re, f_r_im;
+    MandelMath::number_store fz_r_re, fz_r_im;
+    MandelMath::number_store fzz_r_re, fzz_r_im;
+    MandelMath::number_store tmp1_re, tmp1_im;
+    MandelMath::number_store fzfix_re, fzfix_im;
+    MandelMath::number_store laguH_re, laguH_im;
+    MandelMath::number_store laguG_re, laguG_im;
+    MandelMath::number_store laguG2_re, laguG2_im;
+    MandelMath::number_store laguX_re, laguX_im;
+    MandelMath::number_store newtX_re, newtX_im;
+    MandelMath::number_store fzzf_re, fzzf_im;
+    MandelMath::number_store tmp2;
+  } newt;
+  struct InteriorInfo
+  {
+    MandelMath::number_store inte_re, inte_im, inte_abs;
+    MandelMath::number_store fz_re, fz_im, fz_mag;
+  } interior;
+
+  int newton(int period, const complex *c, complex *r, const bool fastHoming, const int suggestedMultiplicity);
+  int periodCheck(int period, const complex *c);
+  int estimateInterior(int period, const complex *c, const complex *root);//, InteriorInfo *interior);
+  void eval_until_bailout(complex *c, complex *f, complex *fc_c);
 #if COMPLEX_IS_TEMPLATE
   template <class NW>
 #endif

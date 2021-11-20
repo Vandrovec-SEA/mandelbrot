@@ -42,11 +42,16 @@ ShareableImageWrapper MandelImageCombiner::getBaseImage()
   return ShareableImageWrapper(&m_baseImage);
 }
 
-void MandelImageCombiner::setFgImage(const QImage &image)
+ShareableImageWrapper MandelImageCombiner::getOverlayImage()
 {
-  m_fgImage = image;
-  update();
+  return ShareableImageWrapper(&m_fgImage);
 }
+
+/*void MandelImageCombiner::setFgImage(QImage &image)
+{
+  m_fgImage.swap(image);
+  update();
+}*/
 
 void MandelImageCombiner::paint(QPainter *painter)
 {

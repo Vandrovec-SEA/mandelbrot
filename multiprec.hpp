@@ -17,7 +17,14 @@ public:
   void add(multiprec *other);
   void mul(multiprec *other);
   void sqr();
+  void recip();
+  void sqrt();
   int round();
+  bool isequal(const multiprec *other);
+  bool is0();
+  bool isle(const multiprec *other);
+  bool isle0();
+  bool isl1();
   double toDouble();
 };
 

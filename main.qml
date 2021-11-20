@@ -10,30 +10,52 @@ Window {
     height: 480
     visible: true
     title: qsTr("Mandelbrot")
+    //Keys.forwardTo: mouseArea //can't attach Keys to Window
 
-    Row {
-        id: toprow;
+    Column {
         anchors.left: parent.left;
-        anchors.right: parent.right;
+        //anchors.right: parent.right;
         anchors.top: parent.top;
+        id: toprow;
+        //width: 150
         Text {
-            id: labelCX;
-            width: 50;
+            id: labelXY;
             text: "fluff";
         }
         Text {
-            id: labelCY;
-            width: 50;
+            id: labelInfoGen;
             text: "bluff";
         }
         Text {
-            id: labelTimes;
-            width: 600;
+            id: labelInfoSpec;
             text: "truff";
         }
     }
 
+    ComboBox {
+        anchors.right: parent.right
+        textRole: "text"
+        valueRole: "key"
+        currentIndex: 1 //cls
+        model: ListModel {
+            id: mymodel
+            ListElement { text: "Kind"; key: 0 }//mandelModel.paintStyleKind }
+            ListElement { text: "Cls"; key: 1 }//mandelModel.paintStyleCls }
+            ListElement { text: "Exter"; key: 2 }//mandelModel.paintStyleExter  }
+            ListElement { text: "Inter"; key: 3 }//mandelModel.paintStyleInter  }
+            ListElement { text: "Near"; key: 4 }//mandelModel.paintStyleNear  }
+        }
+        onActivated: mandelModel.selectedPaintStyle=mymodel.get(currentIndex).key;
+    }
+
+        /*Text {
+            id: labelTimes;
+            width: 600;
+            text: "truff";
+        }*/
+
     MouseArea {
+        id: mouseArea
         anchors.left: parent.left;
         anchors.right: parent.right;
         anchors.top: toprow.bottom;
@@ -43,6 +65,11 @@ Window {
         property bool dragging: false;
         property int drag_last_x;
         property int drag_last_y;
+        Keys.onPressed: { //never triggers
+            console.log(event);
+            if (event.key===Qt.Key_E)
+                mandelModel.paintOrbit(imageCombiner.getOverlayImage(), mouse.x, mouse.y);
+        }
         onPositionChanged:
         {
             if (dragging)
@@ -54,8 +81,9 @@ Window {
             //TODO: else copy from    ((mandel.mousePt.c.re<>view.orbit.re) or (mandel.mousePt.c.im<>view.orbit.im)) then
             //labelCX.text=mandelModel.pixelXtoRE_str(mouse.x);
             //labelCY.text=mandelModel.pixelYtoIM_str(mouse.y);
-            labelCX.text=mouse.x;
-            labelCY.text=mouse.y;
+            mandelModel.paintOrbit(imageCombiner.getOverlayImage(), mouse.x, mouse.y);
+            //labelCX.text=mouse.x;
+            //labelCY.text=mouse.y;
         }
         onPressed: {
             if (mouse.button==Qt.LeftButton)
@@ -63,6 +91,7 @@ Window {
                 dragging=true;
                 drag_last_x=mouse.x;
                 drag_last_y=mouse.y;
+                mandelModel.paintOrbit(imageCombiner.getOverlayImage(), mouse.x, mouse.y);
             };
         }
         onReleased: {
@@ -153,7 +182,10 @@ Window {
         onTriggered: {
             mandelModel.writeToImage(imageCombiner.getBaseImage());
             imageCombiner.update();
-            labelTimes.text=mandelModel.getTimes();
+            //labelTimes.text=mandelModel.getTimes();
+            labelXY.text=mandelModel.getTextXY();
+            labelInfoGen.text=mandelModel.getTextInfoGen();
+            labelInfoSpec.text=mandelModel.getTextInfoSpec();
         }
     }
 }

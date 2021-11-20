@@ -226,6 +226,122 @@ void dd_real::sqr()
   quick_two_sum(p.hi, p.lo);
 }
 
+void dd_real::recip()
+{
+#if 1 //sloppy_div
+  double s1, s2;
+  double q1, q2;
+  dd_real r;
+
+  q1 = 1 / hi;  /* approximate quotient */
+
+  /* compute  this - q1 * dd */
+  r.hi=hi;
+  r.lo=lo;
+  r.mul(q1, 0);
+  s1 = two_diff(1, r.hi, s2);
+  s2 -= r.lo;
+  s2 += 0;
+
+  /* get next approximation */
+  q2 = (s1 + s2) / hi;
+
+  /* renormalize */
+  quick_two_sum(q1, q2);
+#else //accurate_div
+  double q1, q2, q3;
+  dd_real r, tmp;
+
+  q1 = 1 / hi;  /* approximate quotient */
+
+  r.hi=hi;
+  r.lo=lo;
+  r.mul(q1, 0);
+  r.chs();
+  r.add(1, 0); // [1,0] - q1 * self;
+
+  q2 = r.hi / hi;
+  tmp.hi=hi;
+  tmp.lo=lo;
+  tmp.mul(q2, 0);
+  r.add(-tmp.hi, -tmp.lo); //  r -= (q2 * self);
+
+  q3 = r.hi / hi;
+
+  quick_two_sum(q1, q2);
+  add(q3, 0);
+#endif
+}
+
+void dd_real::sqrt()
+{
+  /* Strategy:  Use Karp's trick:  if x is an approximation
+     to 1/sqrt(a), then
+
+        sqrt(a) = a*x + [a - (a*x)^2] * x / 2   (approx)
+
+     The approximation is accurate to twice the accuracy of x.
+     Also, the multiplication (a*x) and [-]*x can be done with
+     only half the precision.
+  */
+
+  if (hi<0) {
+    //dbgPoint();
+    hi=0;
+    lo=0;
+    return;
+  };
+
+  if (hi<=0)
+  {
+    hi=0;
+    lo=0;
+    return;
+  };
+
+
+  double x = 1.0 / std::sqrt(hi);
+  double ax = hi * x;
+  dd_real result;
+  result.hi=ax;
+  result.lo=0;
+  result.sqr();
+  add(-result.hi, -result.lo);
+  hi*=(x*0.5);
+  lo=0;
+  add(ax, 0);
+  //return dd_real::add(ax, (a - dd_real::sqr(ax)).x[0] * (x * 0.5));
+}
+
+bool dd_real::isequal(const dd_real *other)
+{
+  return (hi==other->hi) && (lo==other->lo);
+}
+
+bool dd_real::is0()
+{
+  return hi==0;
+}
+
+bool dd_real::isle(const dd_real *other)
+{
+  if (hi!=other->hi)
+    return hi<other->hi;
+  return lo<=other->lo;
+}
+
+bool dd_real::isle0()
+{
+  if (hi!=0)
+    return hi<0;
+  return lo<=0;
+}
+
+bool dd_real::isl1()
+{
+  return hi<1;
+}
+
 /*
 inline doubledouble recip(const doubledouble& y) {
   x86_FIX

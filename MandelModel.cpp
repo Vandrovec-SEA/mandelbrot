@@ -1,6 +1,7 @@
 #include <math.h>
 #include <QObject>
 #include <QDebug>
+#include <QPainter>
 
 #include "MandelModel.hpp"
 #include "MandelEvaluator.hpp"
@@ -101,7 +102,7 @@ int ctz16(int x)
    MAGIC= 4  5  6  a  7  f  b 14  8 12 10 19  c 1b 15 1e  3  9  e 13 11 18 1a 1d  2  d 17 1c  1 16  0 1f
    MAGIC4=00000001011101110001111100110101 = 0000 0001 0111 0111 0001 1111 0011 0101 0000 = 0x1771f350
    MAGIC3=00010110100111010110011101010001 = 000 1011 0100 1110 1011 0011 1010 1000 1000 =  0xb4eb3a88
-   MAGIC2=11101101000010110010000101110101 = 1110 1101 0000 1011 0010 0001 0111 0101 = 0xed0b2175; 0x3b42c85d4 won't fit
+   MAGIC2=11101101000010110010000101110101 = .. 1110 1101 0000 1011 0010 0001 0111 0101 = 0xed0b2175; 0x3b42c85d4 won't fit
    MAGIC1=00111110010001011011001010100101 = 0 0111 1100 1000 1011 0110 0101 0100 1010 = 0x7c8b654a
    MAGIC0=01001110000101101101100101101001 = 0100 1010 0001 0110 1101 1001 0110 1001 = 0x4e16d969
 
@@ -178,12 +179,14 @@ int ctz16(int x)
 MandelModel::MandelModel(): QObject(), position()
 {
   MandelMath::fpu_fix_start(nullptr);
+  _selectedPaintStyle=paintStyleCls;//Kind;
   epoch=0;
   imageWidth=0;
   imageHeight=0;
   pointStore=nullptr;
   lastGivenPointIndex_=0;
   effortBonus=0;
+  orbit.worker=nullptr;
   //threadCount=4;
   threadCount=QThread::idealThreadCount()-1;
   if (threadCount<1)
@@ -209,6 +212,12 @@ MandelModel::~MandelModel()
   delete[] threads;
   threadCount=0;
   threads=nullptr;
+  //orbit.evaluator.switchType(nullptr);
+  orbit.evaluator.wantStop=true;
+  orbit.evaluator.quit();
+  orbit.evaluator.wait(1000);
+  if (orbit.worker!=nullptr)
+    orbit.pointData.cleanup(orbit.worker);
 
   for (int i=imageWidth*imageHeight-1; i>=0; i--)
   {
@@ -252,6 +261,106 @@ QString MandelModel::getTimes()
         arg((threads[t].timeInvokePostTotal)/1000000000.0, 0, 'f', 3).
         arg((threads[t].timeInvokeSwitchTotal)/1000000000.0, 0, 'f', 3);
   return result;
+}
+
+QString MandelModel::getTextXY()
+{
+  if (orbit.worker==nullptr)
+    return "-";
+  return orbit.worker->toString(&orbit.evaluator.currentParams.c_re)+" +i* "+orbit.worker->toString(&orbit.evaluator.currentParams.c_im);
+}
+
+QString MandelModel::getTextInfoGen()
+{
+  if (orbit.worker==nullptr)
+    return "-";
+  int orbit_x, orbit_y;
+  {
+    MandelMath::number_store tmp;
+    orbit.worker->init(&tmp);
+    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_re);
+    orbit.worker->sub(&tmp, &position.center_re_s);
+    orbit_x=qRound(orbit.worker->toDouble(&tmp)/position.step_size__)+imageWidth/2;
+
+    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_im);
+    orbit.worker->sub(&tmp, &position.center_im_s);
+    orbit_y=imageHeight/2-qRound(orbit.worker->toDouble(&tmp)/position.step_size__);
+    orbit.worker->cleanup(&tmp);
+  }
+  if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
+    return "? +i* ?";
+  MandelPoint *data=&this->pointStore[orbit_x+imageWidth*orbit_y];
+
+  QString state;
+  switch (data->state)
+  {
+    case MandelPoint::State::stUnknown:
+      state="Unk"; break;
+    case MandelPoint::State::stOutside:
+      state="Out"; break;
+    case MandelPoint::State::stOutAngle:
+      state="OutA"; break;
+    case MandelPoint::State::stBoundary:
+      state="Bound"; break;
+    case MandelPoint::State::stDiverge:
+      state="Diver"; break;
+    case MandelPoint::State::stMisiur:
+      state="Misiur"; break;
+    case MandelPoint::State::stPeriod2:
+      state="Per2"; break;
+    case MandelPoint::State::stPeriod3:
+      state="Per3"; break;
+    case MandelPoint::State::stMaxIter:
+      state="Max"; break;
+  }
+
+  return state+" iter="+QString::number(data->iter)+" near="+QString::number(data->near0iter);
+}
+
+QString MandelModel::getTextInfoSpec()
+{
+  if (orbit.worker==nullptr)
+    return "-";
+  int orbit_x, orbit_y;
+  {
+    MandelMath::number_store tmp;
+    orbit.worker->init(&tmp);
+    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_re);
+    orbit.worker->sub(&tmp, &position.center_re_s);
+    orbit_x=qRound(orbit.worker->toDouble(&tmp)/position.step_size__)+imageWidth/2;
+
+    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_im);
+    orbit.worker->sub(&tmp, &position.center_im_s);
+    orbit_y=imageHeight/2-qRound(orbit.worker->toDouble(&tmp)/position.step_size__);
+    orbit.worker->cleanup(&tmp);
+  }
+  if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
+    return "? +i* ?";
+  MandelPoint *data=&this->pointStore[orbit_x+imageWidth*orbit_y];
+
+  switch (data->state)
+  {
+    case MandelPoint::State::stUnknown:
+      return " ";
+      break;
+    case MandelPoint::State::stOutside:
+      return QString("ext=")+QString::number(data->exterior_hits); break;
+    case MandelPoint::State::stOutAngle:
+      return QString("ext=")+QString::number(data->exterior_hits); break;
+    case MandelPoint::State::stBoundary:
+      return " ";
+    case MandelPoint::State::stDiverge:
+      return " ";
+    case MandelPoint::State::stMisiur:
+      return " ";
+    case MandelPoint::State::stPeriod2:
+      return QString("per=")+QString::number(data->period)+" int="+QString::number(data->interior); break;
+    case MandelPoint::State::stPeriod3:
+      return QString("per=")+QString::number(data->period)+" int="+QString::number(data->interior); break;
+    case MandelPoint::State::stMaxIter:
+      return " "; break;
+  }
+  return "-?-?-";
 }
 
 void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
@@ -301,6 +410,10 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
     delta_x_int-=(new_width/2)<<step_scale_n_shift;
   }
 
+  MandelMath::number_store c_im;
+  MandelMath::number_store c_re;
+  position.worker->init(&c_im);
+  position.worker->init(&c_re);
   for (int newy=0; newy<new_height; newy++)
   {
     int oldy;
@@ -308,6 +421,7 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
       oldy=(old_height/2) + (((newy<<step_scale_n_shift)+delta_y_int)>>step_scale_d_shift);
     else
       oldy=-1;//call reset() in the second loop, we may still need the points  =imageHeight;
+    position.pixelYtoIM(new_height/2-newy, &c_im);
     for (int newx=0; newx<new_width; newx++)
     {
       int oldx;
@@ -320,7 +434,10 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
         if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
           new_store[newy*new_width+newx].assign(position.worker, old_store[oldy*old_width+oldx]);
         else
-          new_store[newy*new_width+newx].zero(position.worker);
+        {
+          position.pixelXtoRE(newx - new_width/2, &c_re);
+          new_store[newy*new_width+newx].zero(position.worker, &c_re, &c_im);
+        }
       };
     }
   }
@@ -331,6 +448,7 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
       oldy=(old_height/2) + (((newy<<step_scale_n_shift)+delta_y_int)>>step_scale_d_shift);
     else
       oldy=-1;
+    position.pixelYtoIM(new_height/2-newy, &c_im);
     for (int newx=new_width-1; newx>=0; newx--)
     {
       int oldx;
@@ -343,10 +461,15 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
         if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
           new_store[newy*new_width+newx].assign(position.worker, old_store[oldy*old_width+oldx]);
         else
-          new_store[newy*new_width+newx].zero(position.worker);
+        {
+          position.pixelXtoRE(newx - new_width/2, &c_re);
+          new_store[newy*new_width+newx].zero(position.worker, &c_re, &c_im);
+        }
       }
     }
   }
+  position.worker->cleanup(&c_re);
+  position.worker->cleanup(&c_im);
 }
 
 void MandelModel::setView(double c_re, double c_im, double scale)
@@ -382,7 +505,7 @@ void MandelModel::drag(double delta_x, double delta_y)
   int dx=qRound(delta_x);
   int dy=qRound(delta_y);
   position.move(dx, dy);
-  qDebug()<<"new c: re="<<position.worker->toString(&position.center_re_s)<<",im="<<position.worker->toString(&position.center_im_s);
+  //qDebug()<<"new c: re="<<position.worker->toString(&position.center_re_s)<<",im="<<position.worker->toString(&position.center_im_s);
 
   transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
                  pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
@@ -459,6 +582,114 @@ void MandelModel::startNewEpoch()
       giveWork(&threads[t]);
 }
 
+void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
+{
+  if ((x<0) || (x>=imageWidth) || (y<0) || (y>=imageHeight))
+    return;
+  QImage newOverlay(imageWidth, imageHeight, QImage::Format::Format_ARGB32);
+  QPainter painter(&newOverlay);
+
+  /*/fillRect(transparent) does nothing, does not clear the image
+  painter.setPen(QColor("cyan"));
+  painter.setBrush(QBrush(QColor("yellow")));
+  painter.drawEllipse(150, 50, 100, 50);
+  painter.fillRect(0, 0, imageWidth, imageHeight, Qt::GlobalColor::transparent);
+  painter.drawEllipse(150, 150, 100, 50);
+  //painter.setBackground(QBrush(Qt::BrushStyle::NoBrush));
+  painter.setBackgroundMode(Qt::BGMode::TransparentMode);
+  painter.eraseRect(200, 75, 20, 100);*/
+
+  MandelPoint *data=&pointStore[y*imageWidth+x];
+  if (orbit.worker!=position.worker)
+  {
+    if (orbit.worker)
+    {
+      orbit.pointData.cleanup(orbit.worker);
+    };
+    orbit.pointData.init(position.worker);
+    orbit.worker=position.worker;
+  };
+  switch (data->state)
+  {
+    case MandelPoint::State::stOutside:
+    case MandelPoint::State::stOutAngle:
+    {
+      int exterior;
+      painter.setBrush(Qt::BrushStyle::NoBrush);
+      painter.setPen(QColor(0xff, 0xff, 0));
+      exterior=qRound(data->exterior_hits/position.step_size__);
+      painter.drawEllipse(x-exterior, y-exterior, 2*exterior, 2*exterior);
+      painter.setPen(QColor(0xc0, 0xc0, 0));
+      exterior=qRound(data->exterior_avoids/position.step_size__);
+      painter.drawEllipse(x-exterior, y-exterior, 2*exterior, 2*exterior);
+    } break;
+    case MandelPoint::State::stPeriod2:
+    case MandelPoint::State::stPeriod3:
+    {
+      int interior;
+      painter.setBrush(Qt::BrushStyle::NoBrush);
+      painter.setPen(QColor(0, 0xff, 0xff));
+      interior=qRound(data->interior/position.step_size__);
+      painter.drawEllipse(x-interior, y-interior, 2*interior, 2*interior);
+      painter.setPen(QColor(0, 0xc0, 0xc0));
+      interior=qRound(data->interior/4/position.step_size__);
+      painter.drawEllipse(x-interior, y-interior, 2*interior, 2*interior);
+    } break;
+    default: ;
+  }
+  orbit.evaluator.switchType(position.worker);
+  position.pixelXtoRE(x-imageWidth/2, &orbit.evaluator.currentParams.c_re);
+  position.pixelYtoIM(imageHeight/2-y, &orbit.evaluator.currentParams.c_im);
+  orbit.evaluator.currentParams.epoch=epoch;
+  orbit.evaluator.currentParams.pixelIndex=0;
+  orbit.evaluator.currentParams.maxiter=1<<MAX_EFFORT;
+  orbit.pointData.zero(position.worker, &orbit.evaluator.currentParams.c_re, &orbit.evaluator.currentParams.c_im);
+  orbit.evaluator.startCompute_(&orbit.pointData, +1);
+  //donePixel1(&orbit.evaluator);
+  //orbit.pointData.cleanup(position.worker);
+  image.image->swap(newOverlay);
+}
+
+int MandelModel::periodToIndex(int period)
+{
+  //powers of factors -> color index
+  //[1]..1
+  //[1,1] .. 2
+  //[2] .. 2
+  //[1,1,1] .. 2
+  //[2,1] .. 3
+  //[3] .. 3
+  //[1,1,1,1] .. 2
+  //[2,1,1] .. 4
+  //[2,2] .. 4
+  //[3,1] .. 4
+  //[4] .. 4
+  //[1,1,1,1,1] .. 2
+  //[2,1,1,1] .. 5
+  //[2,2,1] .. 5
+  //[3,1,1] .. 5
+  //[3,2] .. 5
+  //[4,1] .. 5
+  //[5] .. 5
+  if (period<=1)
+    return 0;
+  if (periodToIndexCache.length()<=period)
+    periodToIndexCache.resize(period+1);
+  if (periodToIndexCache[period]!=0)
+    return periodToIndexCache[period];
+  int c=1;
+  for (int i=1; i<=period/2; i++)
+  {
+    if (period % i ==0)
+    {
+      int c2=periodToIndex(i);
+      if (c2>=c)
+        c=c2+1;
+    };
+  }
+  periodToIndexCache[period]=c;
+  return c;
+}
 
 void MandelModel::writeToImage(ShareableImageWrapper image)
 {
@@ -468,45 +699,409 @@ void MandelModel::writeToImage(ShareableImageWrapper image)
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
+      bool knownenum=false;
       MandelPoint *data=&pointStore[y*imageWidth+x];
       //if ((x==222) && (y==170))
         //data->state=MandelPoint::State::stOutside;
-      switch (data->state)
+      switch (_selectedPaintStyle)
       {
-        case MandelPoint::State::stUnknown:
-          image.image->setPixel(x, y, 0x00906090);
-          break;
-        case MandelPoint::State::stOutside:
+        case paintStyle::paintStyleKind:
         {
-          /*int r=128+floor(127*cos(data->iter/10.0*2*3.1415926535));
-          int g=128+floor(127*cos((data->iter/10.0+0.333)*2*3.1415926535));
-          int b=128+floor(127*cos((data->iter/10.0+0.667)*2*3.1415926535));
-          if ((r<0) || (r>255) || (g<0) || (g>255) || (b<0) || (b>255))
-            result.setPixel(x, y, 0xffffffff);
-          else
-            result.setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+(b));*/
-          switch (data->iter % 12)
+          switch (data->state)
           {
-            case  0: image.image->setPixel(x, y, 0xff0000ff); break;
-            case  1: image.image->setPixel(x, y, 0xff0080ff); break;
-            case  2: image.image->setPixel(x, y, 0xff00ffff); break;
-            case  3: image.image->setPixel(x, y, 0xff00ff80); break;
-            case  4: image.image->setPixel(x, y, 0xff00ff00); break;
-            case  5: image.image->setPixel(x, y, 0xff80ff00); break;
-            case  6: image.image->setPixel(x, y, 0xffffff00); break;
-            case  7: image.image->setPixel(x, y, 0xffff8000); break;
-            case  8: image.image->setPixel(x, y, 0xffff0000); break;
-            case  9: image.image->setPixel(x, y, 0xffff0080); break;
-            case 10: image.image->setPixel(x, y, 0xffff00ff); break;
-            case 11: image.image->setPixel(x, y, 0xff8000ff); break;
-            default: image.image->setPixel(x, y, 0xffffffff);
+            case MandelPoint::State::stUnknown:
+              image.image->setPixel(x, y, 0xffffffff);
+              //image.image->setPixel(x, y, 0xff000000);
+              knownenum=true;
+              break;
+            case MandelPoint::State::stOutside:
+            case MandelPoint::State::stOutAngle:
+            {
+              int b=0x9f+floor(0x60*cos((data->iter/10.0+0)*2*3.1415926535));
+              image.image->setPixel(x, y, 0xff000000+(b<<0));
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stBoundary:
+            {
+              image.image->setPixel(x, y, 0xff00ff00);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMisiur:
+            {
+              image.image->setPixel(x, y, 0xff00c000);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stDiverge:
+            {
+              image.image->setPixel(x, y, 0xff008000);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stPeriod2:
+            case MandelPoint::State::stPeriod3:
+            {
+              /*int r;
+              switch (data->period)
+              {
+                case 1: r=0xc0; break;
+                case 2: r=0xff; break;
+                case 3: r=0x80; break;
+                default: r=0xe0;
+              }*/
+              if (data->period>data->near0iter)
+                image.image->setPixel(x, y, 0xffff00ff); //seems to only happen by mistake, not in reality
+              else
+              {
+                int index=periodToIndex(data->period);
+                //reverse bottom 7 bits:
+                int rh=0x73516240>>((index&7)<<2);
+                int rl=0x73516240>>((index&0x70)>>2);
+                rh=0x80 | ((rh&0x07)<<4) | (index&0x08) | (rl&0x07);
+                image.image->setPixel(x, y, 0xff000000+(rh<<16));
+              }
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMaxIter:
+            {
+              image.image->setPixel(x, y, 0xff808080);
+              knownenum=true;
+            } break;
           }
+          if (!knownenum)
+            image.image->setPixel(x, y, 0xffffffff);
         } break;
-        case MandelPoint::State::stMaxIter:
+        case paintStyle::paintStyleCls:
         {
-          image.image->setPixel(x, y, 0xff808080);
+          switch (data->state)
+          {
+            case MandelPoint::State::stUnknown:
+              image.image->setPixel(x, y, 0x00906090);
+              knownenum=true;
+              break;
+            case MandelPoint::State::stOutside:
+            case MandelPoint::State::stOutAngle:
+            {
+              #if 0 //smooth color madness
+              int r=128+floor(127*cos(data->iter/10.0*2*3.1415926535));
+              int g=128+floor(127*cos((data->iter/10.0+0.333)*2*3.1415926535));
+              int b=128+floor(127*cos((data->iter/10.0+0.667)*2*3.1415926535));
+              if ((r<0) || (r>255) || (g<0) || (g>255) || (b<0) || (b>255))
+                result.setPixel(x, y, 0xffffffff);
+              else
+                result.setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+(b));*/
+              #endif
+
+              #if 0 //by data->iter only
+              int iter=data->iter;
+              switch (iter % 12)
+              {
+                case  0: image.image->setPixel(x, y, 0xff0000ff); break;
+                case  1: image.image->setPixel(x, y, 0xff0080ff); break;
+                case  2: image.image->setPixel(x, y, 0xff00ffff); break;
+                case  3: image.image->setPixel(x, y, 0xff00ff80); break;
+                case  4: image.image->setPixel(x, y, 0xff00ff00); break;
+                case  5: image.image->setPixel(x, y, 0xff80ff00); break;
+                case  6: image.image->setPixel(x, y, 0xffffff00); break;
+                case  7: image.image->setPixel(x, y, 0xffff8000); break;
+                case  8: image.image->setPixel(x, y, 0xffff0000); break;
+                case  9: image.image->setPixel(x, y, 0xffff0080); break;
+                case 10: image.image->setPixel(x, y, 0xffff00ff); break;
+                case 11: image.image->setPixel(x, y, 0xff8000ff); break;
+                default: image.image->setPixel(x, y, 0xffffffff);
+              }
+              #endif
+
+              #if 1 //smooth by iter
+              double re=position.worker->toDouble(&data->f_re);
+              double im=position.worker->toDouble(&data->f_im);
+              double iter=data->iter+6-log2(log2(re*re+im*im)); //+6 to match integer coloring
+              iter=iter/12;
+              iter=(iter-floor(iter))*6;
+              int iter_phase=iter;
+              int iter_256=(iter-iter_phase)*256;
+              int r=0xff, g=0xff, b=0xff;
+              switch (iter_phase)
+              {
+                case  0: r=0x00; g=iter_256; b=0xff; break;
+                case  1: r=0x00; g=0xff; b=0xff-iter_256; break;
+                case  2: r=iter_256; g=0xff; b=0x00; break;
+                case  3: r=0xff; g=0xff-iter_256; b=0x00; break;
+                case  4: r=0xff; g=0x00; b=iter_256; break;
+                case  5: r=0xff-iter_256; g=0x00; b=0xff; break;
+              }
+              image.image->setPixel(x, y, 0xff000000|(r<<16)|(g<<8)|b);
+              #endif
+
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stBoundary:
+            {
+              image.image->setPixel(x, y, 0xffffffff);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMisiur:
+            {
+              image.image->setPixel(x, y, 0xffffffff);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stDiverge:
+            {
+              image.image->setPixel(x, y, 0xffffffff);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stPeriod2:
+            case MandelPoint::State::stPeriod3:
+            {
+              int index=periodToIndex(data->period);
+              //reverse bottom 7 bits:
+              int rh=0x73516240>>((index&7)<<2);
+              int rl=0x73516240>>((index&0x70)>>2);
+              rh=0x80 | ((rh&0x07)<<4) | (index&0x08) | (rl&0x07);
+              /*switch (data->period)
+              {
+                case 1: r=0xc0; break;
+                case 2: r=0xff; break;
+                case 3: r=0x80; break;
+                default: r=0xe0;
+              }*/
+              //image.image->setPixel(x, y, 0xffffc0c0);
+              image.image->setPixel(x, y, 0xff000000+rh*0x010101);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMaxIter:
+            {
+              image.image->setPixel(x, y, 0xff808080);
+              knownenum=true;
+            } break;
+          }
+          if (!knownenum)
+            image.image->setPixel(x, y, 0xffffffff);
+        } break;
+        case paintStyle::paintStyleExter:
+        {
+          switch (data->state)
+          {
+            case MandelPoint::State::stUnknown:
+              image.image->setPixel(x, y, 0x00000000);
+              knownenum=true;
+              break;
+            case MandelPoint::State::stOutside:
+            case MandelPoint::State::stOutAngle:
+            {
+              double tf;
+              if ((data->exterior_avoids>10000) || (data->exterior_avoids<=0))
+                tf=0;
+              else if (data->exterior_avoids>=1)
+                tf=(1-data->exterior_avoids)*1;
+              else
+                tf=sqrt(1-log(data->exterior_avoids))*2-2;
+              int r=0x9f+qRound(0x60*sin(tf*2.828)); //red middle
+              int g=0x9f+qRound(0x60*sin(tf*6.928)); //green fastest
+              int b=0x9f+qRound(0x60*sin(tf)); //blue slowest
+              if ((r<0) || (r>255) || (g<0) || (g>255) || (b<0) || (b>255))
+                image.image->setPixel(x, y, 0xffffffff);
+              else
+                image.image->setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+(b));
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stBoundary:
+            {
+              image.image->setPixel(x, y, 0xff308030);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMisiur:
+            {
+              image.image->setPixel(x, y, 0xff308030);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stDiverge:
+            {
+              image.image->setPixel(x, y, 0xff308030);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stPeriod2:
+            case MandelPoint::State::stPeriod3:
+            {
+              double re=position.worker->toDouble(&data->fc_c_re);
+              double im=position.worker->toDouble(&data->fc_c_im);
+              //double angle=std::atan2(im, re);
+              double mag=sqrt(re*re+im*im);
+              int r, g, b;
+              if (mag<=0)
+               { r=0xff; g=0x00; b=0x00; }
+              else
+              {
+                //re/=mag;
+                //im/=mag;
+                if (mag>=1)
+                  mag=0.99;
+                //mag=-log(1-mag)/log(2);
+                int expo;
+                mag=frexp(1-mag, &expo);
+                r=0x40+(int)floor(0xc0*mag);
+                g=r;//0xc0+qRound(0x3f*re);
+                b=r;//0xc0+qRound(0x3f*im);
+              }
+              image.image->setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+b);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMaxIter:
+            {
+              image.image->setPixel(x, y, 0xff808080);
+              knownenum=true;
+            } break;
+          }
+          if (!knownenum)
+            image.image->setPixel(x, y, 0xffffffff);
+        } break;
+        case paintStyle::paintStyleInter:
+        {
+          switch (data->state)
+          {
+            case MandelPoint::State::stUnknown:
+              image.image->setPixel(x, y, 0x00000000);
+              knownenum=true;
+              break;
+            case MandelPoint::State::stOutside:
+            case MandelPoint::State::stOutAngle:
+            {
+              int b=0x60+floor(0x60*cos((data->iter/10.0+0)*2*3.1415926535));
+              image.image->setPixel(x, y, 0xff000000+(b*0x010101));
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stBoundary:
+            {
+              image.image->setPixel(x, y, 0xff308030);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMisiur:
+            {
+              image.image->setPixel(x, y, 0xff308030);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stDiverge:
+            {
+              image.image->setPixel(x, y, 0xff308030);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stPeriod2:
+            case MandelPoint::State::stPeriod3:
+            {
+              int ti=30;
+              if ((data->interior>1) || (data->interior<=0))
+                ti=0;
+              else
+                ti=(qRound(-log(data->interior/4)*300)+12*0xc0) % (6*0xc0);
+              int r, g, b;
+              if (ti<0xC0)
+              { r=0x3f+ti; g=0xff; b=0x3f; }                           // + H L
+              else if (ti<2*0xC0)                                      //
+              { r=0xff; g=0xff-(ti-0xc0); b=0x3f; }                    // H - L
+              else if (ti<3*0xC0)                                      //
+              { r=0xff; g=0x3f; b=0x3f+(ti-2*0xc0); }                  // H L +
+              else if (ti<4*0xC0)                                      //
+              { r=0xff-(ti-3*0xc0); g=0x3f; b=0xff; }                  // - L H
+              else if (ti<5*0xC0)                                      //
+              { r=0x3f; g=0x3f+(ti-4*0xc0); b=0xff; }                  // L + H
+              else                                                     //
+              { r=0x3f; g=0xff; b=0xff-(ti-5*0xc0); }                  // L H -
+              if ((r<0) || (r>255) || (g<0) || (g>255) || (b<0) || (b>255))
+                image.image->setPixel(x, y, 0xffffffff);
+              else
+                image.image->setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+(b));
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMaxIter:
+            {
+              image.image->setPixel(x, y, 0xff808080);
+              knownenum=true;
+            } break;
+          }
+          if (!knownenum)
+            image.image->setPixel(x, y, 0xffffffff);
+        } break;
+        case paintStyle::paintStyleNear:
+        {
+          switch (data->state)
+          {
+            case MandelPoint::State::stUnknown:
+              image.image->setPixel(x, y, 0xff000000);
+              knownenum=true;
+              break;
+            case MandelPoint::State::stOutside:
+            case MandelPoint::State::stOutAngle:
+            {
+              int ti=data->near0iter;
+              if (ti>=0)
+              {
+                int tj=0;
+                while ((ti%2)==0) { tj+=128*2/5; ti/=2; }
+                while ((ti%3)==0) { tj+=128*2/3; ti/=3; }
+                while ((ti%5)==0) { tj+=30; ti/=5; }
+                while ((ti%7)==0) { tj+=40; ti/=7; }
+                while ((ti%11)==0) { tj+=50; ti/=11; }
+                while ((ti%13)==0) { tj+=60; ti/=13; }
+                while ((ti%17)==0) { tj+=70; ti/=17; }
+                int b=0x80+(tj%0x80);
+                image.image->setPixel(x, y, 0xff000000+(b<<0));
+              }
+              else
+                image.image->setPixel(x, y, 0xff000080);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stBoundary:
+            {
+              image.image->setPixel(x, y, 0xff00ff00);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMisiur:
+            {
+              image.image->setPixel(x, y, 0xff00c000);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stDiverge:
+            {
+              image.image->setPixel(x, y, 0xff008000);
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stPeriod2:
+            case MandelPoint::State::stPeriod3:
+            {
+              int ti=data->near0iter;
+              if (ti>=0)
+              {
+                int tj=0;
+                while ((ti%2)==0) { tj+=128*2/5; ti/=2; }
+                while ((ti%3)==0) { tj+=128*2/3; ti/=3; }
+                while ((ti%5)==0) { tj+=30; ti/=5; }
+                while ((ti%7)==0) { tj+=40; ti/=7; }
+                while ((ti%11)==0) { tj+=50; ti/=11; }
+                while ((ti%13)==0) { tj+=60; ti/=13; }
+                while ((ti%17)==0) { tj+=70; ti/=17; }
+                int r=0x80+(tj%0x80);
+                image.image->setPixel(x, y, 0xff000000+(r<<16));
+              }
+              else
+                image.image->setPixel(x, y, 0xff800000);
+              /* we need func(2)!=func(3) here
+              int index=periodToIndex(data->near0iter);
+              //reverse bottom 7 bits:
+              int rh=0x73516240>>((index&7)<<2);
+              int rl=0x73516240>>((index&0x70)>>2);
+              rh=0x80 | ((rh&0x07)<<4) | (index&0x08) | (rl&0x07);
+              image.image->setPixel(x, y, 0xff000000+(rh<<16));*/
+              knownenum=true;
+            } break;
+            case MandelPoint::State::stMaxIter:
+            {
+              image.image->setPixel(x, y, 0xff808080);
+              knownenum=true;
+            } break;
+          }
+          if (!knownenum)
+            image.image->setPixel(x, y, 0xffffffff);
         } break;
       }
+
     }
   //return result;
 }
@@ -558,11 +1153,11 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
             else
             {
               evaluator->switchType(position.worker);
-              position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, &evaluator->currentParams.cr_s);
-              position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &evaluator->currentParams.ci_s);
+              position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, &evaluator->currentParams.c_re);
+              position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &evaluator->currentParams.c_im);
               evaluator->currentParams.epoch=epoch;
               evaluator->currentParams.pixelIndex=pointIndex;
-              if (evaluator->startCompute(pointData, quickrun>=1000))
+              if (evaluator->startCompute_(pointData, quickrun>=1000?-1:0))
               //if (worker->startCompute(pointData, true))
               {
                 evaluator->timeOuter.start();
@@ -626,9 +1221,9 @@ MandelModel::Position::Position():
   center_re_s(),
   center_im_s()
 {
-  worker=&number_worker_double_template;
-  worker->init(&center_re_s, -0.5);
-  worker->init(&center_im_s, 0.0);
+  setNumberType(MandelMath::number_worker::Type::typeDouble);
+  worker->zero(&center_re_s, -0.5);
+  worker->zero(&center_im_s, 0.0);
   //center_re_n.reinit(MandelMath::number::Type::typeDDouble);
   //center_im_n.reinit(MandelMath::number::Type::typeDDouble);
   step_log=7;
@@ -648,8 +1243,11 @@ MandelModel::Position::~Position()
 void MandelModel::Position::setNumberType(MandelMath::number_worker::Type ntype)
 {
   //TODO: try to convert old value to new
-  worker->cleanup(&center_re_s);
-  worker->cleanup(&center_im_s);
+  if (worker!=nullptr)
+  {
+    worker->cleanup(&center_re_s);
+    worker->cleanup(&center_im_s);
+  }
   switch (ntype)
   {
     case MandelMath::number_worker::Type::typeDouble:

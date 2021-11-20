@@ -27,7 +27,8 @@ public:
   virtual void assign(number_store *store, const number_store *src)=0;
   //virtual void assignTo(number_store *src)=0;
   virtual void cleanup(number_store *store)=0;
-  virtual void lshift_(number_store *store, int shoft)=0; // self <<= shoft
+  virtual void chs(number_store *store)=0;
+  virtual void lshift_(number_store *store, int shoft)=0; // self <<= shoft; 1 lshift -10000 = 0 not error
   virtual void frac_pos(number_store *store)=0; //0<=result<1
   virtual void add_double(number_store *store, double x)=0;
   virtual void add(number_store *store, const number_store *other)=0;
@@ -35,6 +36,13 @@ public:
   virtual void rsub(number_store *store, const number_store *other)=0;
   virtual void mul(number_store *store, const number_store *other)=0;
   virtual void sqr(number_store *store)=0;
+  virtual void recip(number_store *store)=0;
+  virtual void sqrt(number_store *store)=0;
+  virtual bool isequal(const number_store *store, const number_store *other)=0; //return store==other
+  virtual bool is0(const number_store *store)=0;
+  virtual bool isle(const number_store *store, const number_store *other)=0; //return store<=other
+  virtual bool isle0(const number_store *store)=0; //return store<=0
+  virtual bool isl1(const number_store *store)=0; //return store<1
 
   virtual QString toString(const number_store *store)=0;
   virtual int toRound(const number_store *store)=0;
@@ -106,6 +114,7 @@ public:
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_double>(*src); };
   //void assignTo(number_store *src) override { store->assignTo_double(*src); };
   void cleanup(number_store *store) override { store->cleanup(Type::typeDouble); }
+  void chs(number_store *store) override;
   void lshift_(number_store *store, int shoft) override;
   void frac_pos(number_store *store) override;
   void add_double(number_store *store, double x) override;
@@ -114,6 +123,13 @@ public:
   void rsub(number_store *store, const number_store *other) override;
   void mul(number_store *store, const number_store *other) override;
   void sqr(number_store *store) override;
+  void recip(number_store *store) override;
+  void sqrt(number_store *store) override;
+  bool isequal(const number_store *store, const number_store *other) override;
+  bool is0(const number_store *store) override;
+  bool isle(const number_store *store, const number_store *other) override;
+  bool isle0(const number_store *store) override;
+  bool isl1(const number_store *store) override;
 
   QString toString(const number_store *store) override;
   int toRound(const number_store *store) override;
@@ -132,6 +148,7 @@ public:
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_ddouble>(*src); };
   //void assignTo(number_store *src) override { store->assignTo_ddouble(*src); };
   void cleanup(number_store *store) override { store->cleanup(Type::typeDDouble); }
+  void chs(number_store *store) override;
   void lshift_(number_store *store, int shoft) override;
   void frac_pos(number_store *store) override;
   void add_double(number_store *store, double x) override;
@@ -140,6 +157,13 @@ public:
   void rsub(number_store *store, const number_store *other) override;
   void mul(number_store *store, const number_store *other) override;
   void sqr(number_store *store) override;
+  void recip(number_store *store) override;
+  void sqrt(number_store *store) override;
+  bool isequal(const number_store *store, const number_store *other) override;
+  bool is0(const number_store *store) override;
+  bool isle(const number_store *store, const number_store *other) override;
+  bool isle0(const number_store *store) override;
+  bool isl1(const number_store *store) override;
 
   QString toString(const number_store *store) override;
   int toRound(const number_store *store) override;
@@ -158,6 +182,7 @@ public:
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_multi>(*src); };;
   //void assignTo(number_store *src) override { store->assignTo_multi(*src); };;
   void cleanup(number_store *store) override { store->cleanup(Type::typeMulti); }
+  void chs(number_store *store) override;
   void lshift_(number_store *store, int shoft) override;
   void frac_pos(number_store *store) override;
   void add_double(number_store *store, double x) override;
@@ -166,6 +191,13 @@ public:
   void rsub(number_store *store, const number_store *other) override;
   void mul(number_store *store, const number_store *other) override;
   void sqr(number_store *store) override;
+  void recip(number_store *store) override;
+  void sqrt(number_store *store) override;
+  bool isequal(const number_store *store, const number_store *other) override;
+  bool is0(const number_store *store) override;
+  bool isle(const number_store *store, const number_store *other) override;
+  bool isle0(const number_store *store) override;
+  bool isl1(const number_store *store) override;
 
   QString toString(const number_store *store) override;
   int toRound(const number_store *store) override;
@@ -185,7 +217,10 @@ template <> struct number_to_type<number_worker_ddouble>
 template <> struct number_to_type<number_worker_multi>
 { static const number_worker::Type ntype=number_worker::Type::typeMulti; };
 */
-#define COMPLEX_IS_TEMPLATE 1 //virtual or templated class complex
+
+void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in_im); //res_re>=0
+
+#define COMPLEX_IS_TEMPLATE 0 //virtual or templated class complex
 #if !COMPLEX_IS_TEMPLATE
 class complex
 {
@@ -213,11 +248,22 @@ public:
   }
   number_store *re_s;
   number_store *im_s;
+  //could use assign(const complex *)
   const number_store *getMagTmp();
+  //could use double toMagDouble();, assuming toDouble is cheaper than mul
+  //could use lshift
   void add(const complex *other);
+  //could use sub(const complex *)
   void mul(const complex *other);
   void sqr();
+  void recip();
+  void recip_prepared();
+  void sqrt();
+  const number_store *mulreT(const complex *other); //Re(this*conjugate(other)) = re*o->re+im*o->im
+  const number_store *dist2_tmp(const complex *other);
+  bool isequal(const complex *other);
 };
+
 #else //COMPLEX_IS_TEMPLATE
 template <class NW>
 class complex
