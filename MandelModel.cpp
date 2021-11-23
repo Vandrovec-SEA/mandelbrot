@@ -178,7 +178,8 @@ int ctz16(int x)
 
 MandelModel::MandelModel(): QObject(), position()
 {
-  MandelMath::fpu_fix_start(nullptr);
+  unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
+  MandelMath::fpu_fix_start(&oldcw);
   _selectedPaintStyle=paintStyleCls;//Kind;
   epoch=0;
   imageWidth=0;
@@ -395,7 +396,7 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
     //  dbgPoint();
     //int delta_y_int=qRound(delta_y);
     position.worker->sub(old_cim, new_cim); //and reversing y at the last minute
-    position.worker->lshift_(old_cim, new_step_log+step_scale_n_shift);
+    position.worker->lshift(old_cim, new_step_log+step_scale_n_shift);
     delta_y_int=position.worker->toRound(old_cim);
     delta_y_int-=(new_height/2)<<step_scale_n_shift;
 
@@ -405,7 +406,7 @@ void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_
     //  dbgPoint();
     //int delta_x_int=qRound(delta_x);
     position.worker->rsub(old_cre, new_cre);
-    position.worker->lshift_(old_cre, new_step_log+step_scale_n_shift);
+    position.worker->lshift(old_cre, new_step_log+step_scale_n_shift);
     delta_x_int=position.worker->toRound(old_cre);
     delta_x_int-=(new_width/2)<<step_scale_n_shift;
   }
@@ -546,6 +547,12 @@ void MandelModel::setImageSize(int width, int height)
     return;
   int newLength=width*height;
   MandelPoint *newStore=new MandelPoint[newLength];
+  QString size_as_text=QString::number(sizeof(MandelPoint)*newLength);
+  for (int pos=size_as_text.length()-3; pos>0; pos-=3)
+  {
+    size_as_text.insert(pos, '\'');
+  }
+  qDebug()<<"pointStore uses "<<size_as_text.constData()<<" B";
   for (int i=0; i<newLength; i++)
     newStore[i].init(position.worker);
 
@@ -588,6 +595,12 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     return;
   QImage newOverlay(imageWidth, imageHeight, QImage::Format::Format_ARGB32);
   QPainter painter(&newOverlay);
+  //QRgb what=newOverlay.pixel(0, 0);
+  //if (what!=0) //0xcdcdcdcd in MSVC compiler
+  {
+    painter.setCompositionMode(QPainter::CompositionMode::CompositionMode_Source);
+    painter.fillRect(0, 0, imageWidth, imageHeight, Qt::GlobalColor::transparent);
+  };
 
   /*/fillRect(transparent) does nothing, does not clear the image
   painter.setPen(QColor("cyan"));
@@ -642,9 +655,15 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   position.pixelYtoIM(imageHeight/2-y, &orbit.evaluator.currentParams.c_im);
   orbit.evaluator.currentParams.epoch=epoch;
   orbit.evaluator.currentParams.pixelIndex=0;
-  orbit.evaluator.currentParams.maxiter=1<<MAX_EFFORT;
   orbit.pointData.zero(position.worker, &orbit.evaluator.currentParams.c_re, &orbit.evaluator.currentParams.c_im);
-  orbit.evaluator.startCompute_(&orbit.pointData, +1);
+  for (int effort=0; effort<=MAX_EFFORT; effort++)
+  {
+    orbit.evaluator.currentParams.maxiter=1<<effort;
+    orbit.evaluator.startCompute(&orbit.pointData, +1);
+    orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
+    if (orbit.pointData.state!=MandelPoint::State::stUnknown)
+      break;
+  }
   //donePixel1(&orbit.evaluator);
   //orbit.pointData.cleanup(position.worker);
   image.image->swap(newOverlay);
@@ -1157,7 +1176,7 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
               position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &evaluator->currentParams.c_im);
               evaluator->currentParams.epoch=epoch;
               evaluator->currentParams.pixelIndex=pointIndex;
-              if (evaluator->startCompute_(pointData, quickrun>=1000?-1:0))
+              if (evaluator->startCompute(pointData, quickrun>=1000?-1:0))
               //if (worker->startCompute(pointData, true))
               {
                 evaluator->timeOuter.start();
@@ -1357,18 +1376,18 @@ void MandelModel::Position::updateCachedDepth()
   MandelMath::number_store d_re_s;
   worker->init(&d_re_s);
   worker->assign(&d_re_s, &center_re_s);
-  worker->lshift_(&d_re_s, step_log-15);
+  worker->lshift(&d_re_s, step_log-15);
   worker->frac_pos(&d_re_s);
-  worker->lshift_(&d_re_s, 15);
+  worker->lshift(&d_re_s, 15);
   cached_center_re_mod=worker->toRound(&d_re_s);
   worker->cleanup(&d_re_s);
 
   MandelMath::number_store d_im_s;
   worker->init(&d_im_s);
   worker->assign(&d_im_s, &center_im_s);
-  worker->lshift_(&d_im_s, step_log-15);
+  worker->lshift(&d_im_s, step_log-15);
   worker->frac_pos(&d_im_s);
-  worker->lshift_(&d_im_s, 15);
+  worker->lshift(&d_im_s, 15);
   cached_center_im_mod=worker->toRound(&d_im_s);
   worker->cleanup(&d_im_s);
 }

@@ -1,4 +1,10 @@
 deBruijn, ctz(): MandelModel#ctz16()
+at r=-0.5, c=-0.75, f^2(-0.501) = -0.500999997999 can't really find root of f^2(r)=r with good precision
+  f^2(r)-f^2(r+e)=e (4 c r + 2 e c + 4 r^3 + 6 e r^2 + 4 e^2 r + e^3)
+  at r^2+c=r: ...=e (4 r^2 + 4 e r^2 + 2 e r + 4 e^2 r + e^3)
+  at r=-0.5:  ...=e (1     +   e     -   e   - 2 e^2   + e^3)
+  or r^2=r-c: ...=e (4 r-4 c + 6 e r-4 e c + 4 e^2 r + e^3)
+  why 3r=2c?
 
 
 

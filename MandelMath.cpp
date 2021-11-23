@@ -206,7 +206,7 @@ void number_worker_double::chs(number_store *store)
   store->as.doubl=-store->as.doubl;
 }
 
-void number_worker_double::lshift_(number_store *store, int shoft)
+void number_worker_double::lshift(number_store *store, int shoft)
 {
   assert(store->dbgType==number_worker::Type::typeDouble);
   store->as.doubl=ldexp(store->as.doubl, shoft);
@@ -351,7 +351,7 @@ void number_worker_ddouble::chs(number_store *store)
   store->as.ddouble_.dd->chs();
 }
 
-void number_worker_ddouble::lshift_(number_store *store, int shoft)
+void number_worker_ddouble::lshift(number_store *store, int shoft)
 {
   assert(store->dbgType==Type::typeDDouble);
   store->as.ddouble_.dd->lshift(shoft);
@@ -494,7 +494,7 @@ void number_worker_multi::chs(number_store *store)
   store->as.multi_.bytes->chs();
 }
 
-void number_worker_multi::lshift_(number_store *store, int shoft)
+void number_worker_multi::lshift(number_store *store, int shoft)
 {
   assert(store->dbgType==Type::typeMulti);
   store->as.multi_.bytes->lshift(shoft);
@@ -661,7 +661,7 @@ void complex::sqr()
   worker->assign(&tmp1_s, im_s);
   worker->sqr(&tmp1_s);
   worker->mul(im_s, re_s);
-  worker->lshift_(im_s, 1);
+  worker->lshift(im_s, 1);
   worker->sqr(re_s);
   worker->sub(re_s, &tmp1_s);
 }
@@ -682,7 +682,6 @@ void complex::recip_prepared()
 
 void complex::sqrt()
 {
-  double t1;
   worker->assign(&tmp1_s, re_s);
   worker->assign(&tmp2_s, im_s);
   worker->sqr(&tmp1_s);
@@ -692,20 +691,20 @@ void complex::sqrt()
   if (!worker->isle0(re_s))
   {
     worker->add(&tmp1_s, re_s);
-    worker->lshift_(&tmp1_s, -1);
+    worker->lshift(&tmp1_s, -1);
     worker->sqrt(&tmp1_s); //t1=sqrt((sqrt(re*re+im*im)+re)/2);
     worker->assign(re_s, &tmp1_s);
     /*if (t1==0)
       *res_im=0;
     else*/
-    worker->lshift_(&tmp1_s, 1);
+    worker->lshift(&tmp1_s, 1);
     worker->recip(&tmp1_s);
     worker->mul(im_s, &tmp1_s); //im=im/(2*t1);
   }
   else
   {
     worker->sub(&tmp1_s, re_s);
-    worker->lshift_(&tmp1_s, -1);
+    worker->lshift(&tmp1_s, -1);
     worker->sqrt(&tmp1_s); //t1=sqrt((sqrt(re*re+im*im)-re)/2);
     if (worker->isle0(&tmp1_s)) //t1==0
     {
@@ -716,7 +715,7 @@ void complex::sqrt()
     {
       worker->assign(re_s, im_s);
       worker->assign(im_s, &tmp1_s); //new im=t1
-      worker->lshift_(&tmp1_s, 1);
+      worker->lshift(&tmp1_s, 1);
       worker->recip(&tmp1_s);
       worker->mul(re_s, &tmp1_s); //re=old im/(2*t1);
       if (worker->isle0(re_s)) //isl0 would be nicer here

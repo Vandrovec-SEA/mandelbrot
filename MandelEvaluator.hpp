@@ -34,6 +34,10 @@ struct MandelPoint
   MandelMath::number_store f_re, f_im;
   MandelMath::number_store fc_c_re, fc_c_im; //fc_c, or fz_r if stPeriod2 or stPeriod3
   MandelMath::number_store fz_c_mag;
+  int lookper_startiter, lookper_prevGuess;
+  MandelMath::number_store lookper_startf_re, lookper_startf_im;
+  MandelMath::number_store lookper_nearr_dist;
+  MandelMath::number_store lookper_totalFzmag;
   int near0iter;
   MandelMath::number_store near0f_re, near0f_im;
   int period;
@@ -84,20 +88,19 @@ public:
   } currentParams;
   MandelPoint currentData;
 
-  bool startCompute_(const MandelPoint *data, int quick_route); //qr: -1..never 0..auto 1..always
+  bool startCompute(const MandelPoint *data, int quick_route); //qr: -1..never 0..auto 1..always
 protected:
   typedef MandelMath::complex complex;
   struct
   {
     MandelMath::number_store fz_r_re, fz_r_im;
     MandelMath::number_store near0fmag;
-    MandelMath::number_store lookper_startf_re, lookper_startf_im;
-    MandelMath::number_store lookper_bestf_re, lookper_bestf_im;
-    MandelMath::number_store lookper_near0f_re, lookper_near0f_im; //TODO: near0f->nearc
-    MandelMath::number_store lookper_near0f_dist;
-    MandelMath::number_store lookper_dist2;
-    int lookper_startiter, lookper_prevGuess, lookper_lastGuess;
-    MandelMath::number_store lookper_totalFzmag;
+    //MandelMath::number_store lookper_bestf_re, lookper_bestf_im;
+    MandelMath::number_store lookper_nearr_re, lookper_nearr_im;//, lookper_nearr_dist;
+    //MandelMath::number_store lookper_dist2;
+    //int lookper_startiter, lookper_prevGuess;
+    int lookper_lastGuess;
+    //MandelMath::number_store lookper_totalFzmag;
   } eval;
   struct
   {

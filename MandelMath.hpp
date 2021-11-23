@@ -28,7 +28,7 @@ public:
   //virtual void assignTo(number_store *src)=0;
   virtual void cleanup(number_store *store)=0;
   virtual void chs(number_store *store)=0;
-  virtual void lshift_(number_store *store, int shoft)=0; // self <<= shoft; 1 lshift -10000 = 0 not error
+  virtual void lshift(number_store *store, int shoft)=0; // self <<= shoft; 1 lshift -10000 = 0 not error
   virtual void frac_pos(number_store *store)=0; //0<=result<1
   virtual void add_double(number_store *store, double x)=0;
   virtual void add(number_store *store, const number_store *other)=0;
@@ -115,7 +115,7 @@ public:
   //void assignTo(number_store *src) override { store->assignTo_double(*src); };
   void cleanup(number_store *store) override { store->cleanup(Type::typeDouble); }
   void chs(number_store *store) override;
-  void lshift_(number_store *store, int shoft) override;
+  void lshift(number_store *store, int shoft) override;
   void frac_pos(number_store *store) override;
   void add_double(number_store *store, double x) override;
   void add(number_store *store, const number_store *other) override;
@@ -149,7 +149,7 @@ public:
   //void assignTo(number_store *src) override { store->assignTo_ddouble(*src); };
   void cleanup(number_store *store) override { store->cleanup(Type::typeDDouble); }
   void chs(number_store *store) override;
-  void lshift_(number_store *store, int shoft) override;
+  void lshift(number_store *store, int shoft) override;
   void frac_pos(number_store *store) override;
   void add_double(number_store *store, double x) override;
   void add(number_store *store, const number_store *other) override;
@@ -183,7 +183,7 @@ public:
   //void assignTo(number_store *src) override { store->assignTo_multi(*src); };;
   void cleanup(number_store *store) override { store->cleanup(Type::typeMulti); }
   void chs(number_store *store) override;
-  void lshift_(number_store *store, int shoft) override;
+  void lshift(number_store *store, int shoft) override;
   void frac_pos(number_store *store) override;
   void add_double(number_store *store, double x) override;
   void add(number_store *store, const number_store *other) override;

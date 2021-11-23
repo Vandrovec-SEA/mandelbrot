@@ -1,6 +1,14 @@
 #include "double_double.hpp"
 #include <cmath>
 
+#if defined(_WIN32) && !defined(__GNUC__)
+#ifdef __BORLANDC__
+#else
+  /* Win 32 MSVC */
+  #include <float.h>
+#endif
+#endif
+
 namespace MandelMath {
 
 // https://www.davidhbailey.com/dhbsoftware/
@@ -22,7 +30,10 @@ void fpu_fix_start(unsigned int *old_cw) {
 #else
   /* Win 32 MSVC */
   unsigned int cw = _control87(0, 0);
-  _control87(0x00010000, 0x00030000);
+  #ifndef _WIN64 //why can't switch precision? why do they return value that is not in use?
+  if ((cw & 0x00030000) != 0x00010000)
+    _control87(0x00010000, 0x00030000);
+  #endif
   if (old_cw) {
     *old_cw = cw;
   }
