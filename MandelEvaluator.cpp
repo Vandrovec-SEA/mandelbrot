@@ -1,57 +1,65 @@
 #include "MandelEvaluator.hpp"
 #include <cmath>
 
-/*
-MandelMath::number_any::number_any():
-  my_store(), impl(nullptr), store(&my_store)
+LaguerrePoint::LaguerrePoint()
 {
-
+  //reset();
+  //should be overwritten before read:
+  state=State::stUnknown;
+  iter=0;
+  firstM=0;
 }
 
-MandelMath::number_any::number_any(number_store *store):
-  my_store(), impl(nullptr), store(store)
+void LaguerrePoint::assign(MandelMath::number_worker *worker, const LaguerrePoint &src)
 {
-
+  worker->assign(&f_re, &src.f_re);
+  worker->assign(&f_im, &src.f_im);
+  worker->assign(&fz_r_re, &src.fz_r_re);
+  worker->assign(&fz_r_im, &src.fz_r_im);
+  state=src.state;
+  iter=src.iter;
+  firstM=src.firstM;
 }
 
-MandelMath::number_any::number_any(number_any *src):
-  my_store(), impl(nullptr), store(&my_store)
+void LaguerrePoint::init(MandelMath::number_worker *worker)
 {
-  reinit(src->ntype_());
-  if (impl==nullptr)
+  worker->init(&f_re, 0.0);
+  worker->init(&f_im, 0.0);
+  worker->init(&fz_r_re, 0.0);
+  worker->init(&fz_r_im, 0.0);
+  //should be overwritten before read:
+  state=State::stUnknown;
+  iter=0;
+  firstM=0;
+}
+
+void LaguerrePoint::zero(MandelMath::number_worker *worker, const MandelMath::number_store *c_re, const MandelMath::number_store *c_im)
+{
+  //worker->zero(&f_re, 0);
+  //worker->zero(&f_im, 0);
+  worker->assign(&f_re, c_re);
+  worker->assign(&f_im, c_im);
+  worker->zero(&fz_r_re, 1);
+  worker->zero(&fz_r_im, 0);
+
+  state=State::stUnknown;
+  iter=0;
+  firstM=0;
+}
+
+void LaguerrePoint::cleanup(MandelMath::number_worker *worker)
+{
+  if (worker==nullptr)
     dbgPoint();
   else
-    impl->assign(store, src->store);
-}
-
-MandelMath::number_any::~number_any()
-{
-  if (store==&my_store)
   {
-    if (impl==nullptr)
-      dbgPoint();
-    else
-      impl->cleanup(store);
+    worker->cleanup(&fz_r_im);
+    worker->cleanup(&fz_r_re);
+    worker->cleanup(&f_im);
+    worker->cleanup(&f_re);
   }
-  impl=nullptr;
 }
 
-void MandelMath::number_any::reinit(MandelMath::number_worker *worker)
-{ //TODO: should try to convert old value to new type
-  if (worker==impl)
-    return;
-  if (impl)
-    impl->cleanup(store);
-  impl=worker;
-  if (impl)
-    impl->init(store);
-}
-
-MandelMath::number_worker *MandelMath::number_any::ntype_()
-{
-  return impl;
-}
-*/
 
 
 MandelPoint::MandelPoint()
@@ -163,6 +171,73 @@ void MandelPoint::cleanup(MandelMath::number_worker *worker)
   }
 }
 
+ShareableViewInfo::ShareableViewInfo(): worker(nullptr), re_(), im(), root_re(), root_im(), scale(1), period(0)
+{
+
+}
+
+ShareableViewInfo::ShareableViewInfo(ShareableViewInfo &src): QObject()
+{
+  worker=src.worker;
+  scale=src.scale;
+  period=src.period;
+  if (worker!=nullptr)
+  {
+    worker->swap(&re_, &src.re_);
+    worker->swap(&im, &src.im);
+    worker->swap(&root_re, &src.root_re);
+    worker->swap(&root_im, &src.root_im);
+  };
+}
+
+ShareableViewInfo::ShareableViewInfo(const ShareableViewInfo &src): ShareableViewInfo((ShareableViewInfo &)src)
+{
+  //why do you need this?
+}
+
+ShareableViewInfo::ShareableViewInfo(ShareableViewInfo &&src): QObject()
+{
+  worker=src.worker;
+  scale=src.scale;
+  period=src.period;
+  if (worker!=nullptr)
+  {
+    worker->swap(&re_, &src.re_);
+    worker->swap(&im, &src.im);
+    worker->swap(&root_re, &src.root_re);
+    worker->swap(&root_im, &src.root_im);
+  };
+}
+
+ShareableViewInfo &ShareableViewInfo::operator=(ShareableViewInfo &src)
+{
+  worker=src.worker;
+  scale=src.scale;
+  period=src.period;
+  if (worker!=nullptr)
+  {
+    worker->swap(&re_, &src.re_);
+    worker->swap(&im, &src.im);
+    worker->swap(&root_re, &src.root_re);
+    worker->swap(&root_im, &src.root_im);
+  };
+  return *this;
+}
+
+ShareableViewInfo &ShareableViewInfo::operator=(ShareableViewInfo &&src)
+{
+  worker=src.worker;
+  scale=src.scale;
+  period=src.period;
+  if (worker!=nullptr)
+  {
+    worker->swap(&re_, &src.re_);
+    worker->swap(&im, &src.im);
+    worker->swap(&root_re, &src.root_re);
+    worker->swap(&root_im, &src.root_im);
+  };
+  return *this;
+}
 
 
 
@@ -281,8 +356,12 @@ void MandelEvaluator::switchType(MandelMath::number_worker *worker)
     currentWorker->cleanup(&newt.tmp1_re);
     currentWorker->cleanup(&newt.fzz_r_im);
     currentWorker->cleanup(&newt.fzz_r_re);
-    currentWorker->cleanup(&newt.fz_r_im);
-    currentWorker->cleanup(&newt.fz_r_re);
+    currentWorker->cleanup(&newtres_.first_guess_lagu_re);
+    currentWorker->cleanup(&newtres_.first_guess_lagu_im);
+    currentWorker->cleanup(&newtres_.first_guess_newt_re);
+    currentWorker->cleanup(&newtres_.first_guess_newt_im);
+    currentWorker->cleanup(&newtres_.fz_r_im);
+    currentWorker->cleanup(&newtres_.fz_r_re);
     currentWorker->cleanup(&newt.f_r_im);
     currentWorker->cleanup(&newt.f_r_re);
     currentWorker->cleanup(&newt.bestr_im);
@@ -299,7 +378,6 @@ void MandelEvaluator::switchType(MandelMath::number_worker *worker)
     currentData.cleanup(currentWorker);
   }
   if (worker)
-  if (worker)
   {
     currentData.init(worker);
     worker->init(&currentParams.c_re);
@@ -315,8 +393,12 @@ void MandelEvaluator::switchType(MandelMath::number_worker *worker)
     worker->init(&newt.bestr_im);
     worker->init(&newt.f_r_re);
     worker->init(&newt.f_r_im);
-    worker->init(&newt.fz_r_re);
-    worker->init(&newt.fz_r_im);
+    worker->init(&newtres_.fz_r_im);
+    worker->init(&newtres_.fz_r_re);
+    worker->init(&newtres_.first_guess_newt_re);
+    worker->init(&newtres_.first_guess_newt_im);
+    worker->init(&newtres_.first_guess_lagu_re);
+    worker->init(&newtres_.first_guess_lagu_im);
     worker->init(&newt.fzz_r_re);
     worker->init(&newt.fzz_r_im);
     worker->init(&newt.tmp1_re);
@@ -401,10 +483,41 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
   double accyBound=3e-28/(period*period);
   double accyBound2=3e-39*period/log(1+period)*1.5; //1.5=magic
   double order1; // 1/highest power in the polynomial, 2^period in case of mandelbrot set
-  if (period<1024)
+  int maxm;
+  {
+    currentWorker->assign(&newtres_.first_guess_lagu_re, r->re_s);
+    currentWorker->assign(&newtres_.first_guess_lagu_im, r->im_s);
+    currentWorker->assign(&newtres_.first_guess_newt_re, r->re_s);
+    currentWorker->assign(&newtres_.first_guess_newt_im, r->im_s);
+    double r_re=currentWorker->toDouble(r->re_s);
+    double r_im=currentWorker->toDouble(r->im_s);
+    newtres_.first_fejer_re=r_re; newtres_.first_fejer_im=r_im;
+    newtres_.first_naive1_re_=r_re; newtres_.first_naive1_im=r_im;
+    newtres_.first_naive2_re=r_re; newtres_.first_naive2_im=r_im;
+    newtres_.first_naive_re=r_re; newtres_.first_naive_im=r_im;
+    newtres_.naiveChoice=NewtonNaiveChoice::ncClose;
+    newtres_.first_neumaier1_re_=r_re; newtres_.first_neumaier1_im_=r_im;
+    newtres_.first_neumaier2_re=r_re; newtres_.first_neumaier2_im=r_im;
+    newtres_.first_lagu1_re=r_re; newtres_.first_lagu1_im=r_im;
+    newtres_.first_lagu1o_re=r_re; newtres_.first_lagu1o_im=r_im;
+    newtres_.firstMu_re=1; newtres_.firstMu_im=0;
+  }
+  if (period<5)
+  {
+    maxm=ldexp(1, period-1); //in theory up to n-1 but for Mandelbrot that's rarely the case
     order1=ldexp(1, -period);
+  }
+  else if (period<1024)
+  {
+    maxm=15;
+    order1=ldexp(1, -period);
+  }
   else
+  {
+    maxm=15;
     order1=0;
+  }
+  //maxm=1;
   //int multiplicity1=1;
   int trustedMultiplicity=1;
   bool triedZeroGzrm=false;
@@ -419,7 +532,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
   else
     clever.mult=1;
   complex f_r(currentWorker, &newt.f_r_re, &newt.f_r_im, true);
-  complex fz_r(currentWorker, &newt.fz_r_re, &newt.fz_r_im, true);
+  complex fz_r(currentWorker, &newtres_.fz_r_re, &newtres_.fz_r_im, true);
   complex fzz_r(currentWorker, &newt.fzz_r_re, &newt.fzz_r_im, true);
   complex tmp1(currentWorker, &newt.tmp1_re, &newt.tmp1_im, true);
   complex fzfix(currentWorker, &newt.fzfix_re, &newt.fzfix_im, true);
@@ -431,6 +544,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
   complex fzzf(currentWorker, &newt.fzzf_re, &newt.fzzf_im, true);
   for (int newtonCycle=0; newtonCycle<50; newtonCycle++)
   {
+    newtres_.cyclesNeeded=newtonCycle;
     if ((movedOff) && (newtonCycle>10) && (order1>=0))
     {                                    //  p m -> p
       order1=-1;                         //  2 2    1
@@ -441,8 +555,8 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       trustedMultiplicity=1;
     currentWorker->assign(&newt.f_r_re, r->re_s);
     currentWorker->assign(&newt.f_r_im, r->im_s);
-    currentWorker->zero(&newt.fz_r_re, 1.0);
-    currentWorker->zero(&newt.fz_r_im, 0);
+    currentWorker->zero(&newtres_.fz_r_re, 1.0);
+    currentWorker->zero(&newtres_.fz_r_im, 0);
     currentWorker->zero(&newt.fzz_r_re, 0);
     currentWorker->zero(&newt.fzz_r_im, 0);
     //TODO: can we skip computing fzz_r if order1<0? and remember last valid multiplicity or set it to 1
@@ -459,8 +573,8 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       currentWorker->assign(tmp1.im_s, fz_r.im_s);
       tmp1.sqr();
       fzz_r.add(&tmp1);
-      currentWorker->lshift(tmp1.re_s, 1);
-      currentWorker->lshift(tmp1.im_s, 1);
+      currentWorker->lshift(fzz_r.re_s, 1);
+      currentWorker->lshift(fzz_r.im_s, 1);
       //fz:=2*f*fz
       fz_r.mul(&f_r);
       currentWorker->lshift(fz_r.re_s, 1);
@@ -478,7 +592,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
     double gz_r_mag=currentWorker->toDouble(fz_r.getMagTmp());
 #if CLEVER_FIX
 //c=-0.7499 p=2
-//  ideally, r=-0.5+-0.01i who are repelling
+//  ideally, r=-0.5+-0.01i who are repelling  (and +0.5+-sqrt(0.9999) who are repel and attr)
 //  but we have f(-0.5001)=-0.49979999, f^2(-0.5001)=-0.5000999699959999
 //  due to rounding errors, it looks as if we are at a root
 //  and this point is attracting, so we have verified a false double period
@@ -516,6 +630,15 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
         else
           return 1;
       };
+
+      //new conditions
+      //the one legit reason to end: step<2^-53/|f'| (for |f'|<1) exactly because step*|f'|=2^-53
+      //    |f|/|f'|<2^-53/|f'|
+      //    |f|^2<2^-106=1.23e-32
+      if (g_r_mag<3.5*currentWorker->eps2()) //seen 3.246
+        return trustedMultiplicity;
+
+
       if (((gz_r_mag>1e-6) && (g_r_mag/gz_r_mag<accyBound)) || //((fm<NEWTON_EPSILON) and (ffm>1e-6)) or //check just f on single roots
           ((g_r_mag<1e-20) && (g_r_mag/gz_r_mag<accyBound)) || //for high period - and high derivative - we cannot minimize f given the finite precision of root
            ((gz_r_mag<1e-6) && (g_r_mag/gz_r_mag<2.1e-30)))   //check f/ff on multiple roots
@@ -536,8 +659,10 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
     };
     if (currentWorker->isequal(r->re_s, &newt.bestr_re) &&
         currentWorker->isequal(r->im_s, &newt.bestr_im) &&
-        (bestfm<1e10))
+        (bestfm<1e10) && (newtonCycle>2)) //Lagu can cycle in first 2 cycles
     { //Laguerre can cycle (at least my version), e.g. per=2, c=-0.6640625-0.015625i, r=-0.614213552325963974-0,0179149806499481201i
+      if (g_r_mag<3.5*currentWorker->eps2()) //should be tested above but maybe use different margin here?
+        return trustedMultiplicity;
       return 0; //just fail and try again next time
     };
     if (g_r_mag<bestfm)
@@ -705,20 +830,305 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       currentWorker->sub(laguH.im_s, fzzf.im_s); //G^2-fzzf = f'^2/f^2-f''*f/f^2 = laguH
       //currentWorker->assign(tmp1.re_s, laguG2.re_s);
       //currentWorker->assign(tmp1.im_s, laguG2.im_s);
+      int m=1;
       double G2HT_re=currentWorker->toDouble(laguG2.mulreT(&laguH));
       double H_mag=currentWorker->toDouble(laguH.getMagTmp());
+#if 0 //m=G^2/H
       //1.5*mag(H)>Re(G^2*H^T) ... m=1
       //300*mag(H)<Re(G^2*H^T) ... m=300
       //mag(H)<Re(G^2*H^T)*order1 ... m=1/order1
-      int m=1;
       if (1.5*H_mag>=G2HT_re) //>= so we don't divide G^2/H if H=G=0
         m=1;
       else if ((clever.mult+0.5)*H_mag<=G2HT_re)
         m=1; //best practice is to use m=1 if H=0   clever.mult;
-      else if (H_mag<G2HT_re*order1)
-        m=qRound(1/order1);
+      else if (H_mag*(maxm-0.5)<G2HT_re)
+        m=maxm;
       else
         m=qRound(G2HT_re/H_mag);
+#else //m= some func of mu where mu is solution of ((1-1/n)*H/G^2-1/n) mu^2 + mu/n -1=0
+      double G2_mag=currentWorker->toDouble(laguG2.getMagTmp());
+      if (G2_mag<0.01)
+      {
+        m=1;
+        if (newtonCycle==0)
+        {
+          newtres_.firstMu_re=1;
+          newtres_.firstMu_im=0;
+        };
+      }
+      else
+      {
+        currentWorker->assign(laguX.re_s, laguG2.re_s);
+        currentWorker->assign(laguX.im_s, laguG2.im_s);
+        currentWorker->chs(laguX.im_s);
+        laguX.mul(&laguH);
+        double a_re=currentWorker->toDouble(laguX.re_s)/G2_mag*(1-order1)-order1;
+        double a_im=currentWorker->toDouble(laguX.im_s)/G2_mag*(1-order1);
+        double mu_re, mu_im;
+        MandelMath::complex_double_quadratic(&mu_re, &mu_im, a_re, a_im, order1, 0, -1, 0);
+        if (newtonCycle==0)
+        {
+          newtres_.firstMu_re=mu_re;
+          newtres_.firstMu_im=mu_im;
+        };
+        if (mu_re<1.3)
+          m=1;
+        else if (abs(mu_im)>mu_re/2)
+          m=1;
+        else
+        {
+          double mu_mag=mu_re*mu_re+mu_im*mu_im;
+          m=qRound(sqrt(mu_mag)); //or just round mu_re?
+          if (m>maxm)
+            m=maxm;
+        }
+      }
+#endif
+      if (newtonCycle==0)
+      {
+        if ((2*maxm+1)*H_mag<=G2HT_re)
+          newtres_.firstM=2*maxm+1; //need to see a bit above order//2*maxm ~ order but without overflow
+        else /*if (H_mag<G2HT_re*order1)
+          newtres_.firstM=qRound(1/order1);
+        else / *if (1.5*H_mag>=G2HT_re) //>= so we don't divide G^2/H if H=G=0
+          m=1;
+        else*/
+          newtres_.firstM=G2HT_re/H_mag;
+
+        //Fejer bound: smaller solution x of
+        //fzz/(n-1) x^2+2 fz x + n f=0
+        //x=y*n
+        //fzz*n/(n-1) y^2+2 fz y + f=0
+
+        double r_re=currentWorker->toDouble(r->re_s);
+        double r_im=currentWorker->toDouble(r->im_s);
+        //numbers are small but don't need precision so let's do it in double
+        double a_re=currentWorker->toDouble(fzz_r.re_s)/(1-order1);
+        double a_im=currentWorker->toDouble(fzz_r.im_s)/(1-order1);
+        double fz_re=currentWorker->toDouble(fz_r.re_s);
+        double fz_im=currentWorker->toDouble(fz_r.im_s);
+        double f_re=currentWorker->toDouble(f_r.re_s);
+        double f_im=currentWorker->toDouble(f_r.im_s);
+        MandelMath::complex_double_quadratic(
+              &newtres_.first_fejer_re, &newtres_.first_fejer_im,
+              a_re, a_im,
+              fz_re, fz_im,
+              f_re, f_im);
+        newtres_.first_fejer_re=r_re+ldexp(newtres_.first_fejer_re, period);
+        newtres_.first_fejer_im=r_im+ldexp(newtres_.first_fejer_im, period);
+
+        //Batra's bound https://www.tuhh.de/ti3/paper/rump/Ru03c.pdf theorem 3.8
+          //but only for real coefficients
+        //|fz r|-|f + fzz/2 r^2|=0, find r
+        //sqrt(fz fz^T) r=sqrt((f + fzz/2 r^2)(f^T + fzz^T/2 r^2))
+        //sqrt(fz fz^T) r=sqrt((|f|^2+ Re(f^T fzz) r^2 + |fzz|^2/4 r^4))
+        //(a+bi)(c-di)+(a-bi)(c+di)=2ac+2bd=2 Re(f fzz^T)
+        //|fz|^2 r^2=|f|^2+ Re(f^T fzz) r^2 + |fzz|^2/4 r^4
+        //0=|f|^2+ (Re(f^T fzz)-|fz|^2) rr + |fzz|^2/4 rr^2    r=sqrt(rr)
+
+        /*MandelMath::complex_double_quadratic(&newtres_.first_batra, &a_im,
+            currentWorker->toDouble(fzz_r.getMagTmp())/4, 0,
+            (currentWorker->toDouble(f_r.mulreT(&fzz_r))-currentWorker->toDouble(fz_r.getMagTmp()))/2, 0,
+            currentWorker->toDouble(f_r.getMagTmp()), 0);
+        if (newtres_.first_batra>=0)
+          newtres_.first_batra=sqrt(newtres_.first_batra);*/
+
+        //https://ur.booksc.eu/book/5736333/a5b588
+        //ZAMM - Journal of Applied Mathematics and Mechanics / Zeitschrift für Angewandte Mathematik und Mechanik
+        //1988 Vol. 68; Iss. 6
+        //Dr. A. Neumaier: An Existence Test for Root Clusters and Multiple Roots
+        //fi(c, r, alpha)=r abs(re((f(c+r e^ialpha)-f(c))/(c+r e^ialpha)))-abs(f(c))
+        //  addition from https://ur.booksc.eu/book/5736333/a5b588 remark 3:
+        //  f needs to be divided (or rotated) by f' first to make f' real
+        //for all alpha, which r makes fi==0 ?
+        //abs(re(f'*r+f''/2 r^2 e^ialpha))=abs(f)
+        //for max re(f'*r+f''/2 r^2 e^ialpha), we need max re(f'+f''/2 r e^ialpha) because r is real
+        //f'' e^ialpha=real
+        //e^ialpha=f''^T/sqrt(f'' f''^T)=sqrt(f''^T/f'')
+        //abs(re(f'*r+ r^2/2 sqrt(f'' f''^T)))-abs(f)=0
+        //r*abs(re(f'))+ r^2/2 sqrt(f'' f''^T)-abs(f)=0
+        /*if (currentWorker->isle0(fz_r.re_s))
+          MandelMath::complex_double_quadratic(&newtres_.first_batra, &a_im,
+              +sqrt(currentWorker->toDouble(fzz_r.getMagTmp()))/2, 0,
+              //currentWorker->toDouble(fz_r.re_s)/2, 0,
+              sqrt(currentWorker->toDouble(fz_r.getMagTmp()))/2, 0,
+              +sqrt(currentWorker->toDouble(f_r.getMagTmp())), 0);
+        else*/
+        MandelMath::complex_double_quadratic(&newtres_.first_neumaier1_re_, &newtres_.first_neumaier1_im_,
+            -sqrt(currentWorker->toDouble(fzz_r.getMagTmp()))/2, 0,
+            sqrt(currentWorker->toDouble(fz_r.getMagTmp()))/2, 0,
+            -sqrt(currentWorker->toDouble(f_r.getMagTmp())), 0);
+
+        /* Neumaier for k=2:
+        Re(f''(z)/2) > |f| r^-2 + |f'| r^-1      r real, r>0
+        f''(z)=f''+(z-z0)f'''+...
+        |f''+r|f'''|+...|/2 r^2 > |f| + |f'| r
+        ...+|f'''|r^3/2+|f''| r^2/2 > |f| + |f'|r
+                        |f''| r^2/2 > |f| + |f'|r
+        gives always r<0 but that's the wrong root
+        |f''| r^2/2 - |f'|r - |f| =0
+        2*|f'|/|f''|+-sqrt(4*|f'|^2/|f''|^2-8*|f|/|f''|)
+        |f'|/|f''|+-sqrt(|f'|^2/|f''|^2+2*|f|/|f''|)
+        works if |f'|^2/|f''|+2*|f|>0 i.e. always
+        but r1 always<0, r2>2*|f'|/|f''|
+        r2=(|f'|+sqrt(|f'|^2+2*|f|*|f''|))/|f''|
+
+        test x(x-1) at 2+i
+        f=1+3i f'=2x-1=3+2i f''=2
+        r2=(|3+2*I|+sqrt(|3+2*I|^2+2*2*|1+3*I|))/2
+        4.33502318885498454
+        correct is 2.236
+        */
+        double fm=sqrt(currentWorker->toDouble(f_r.getMagTmp()));
+        double fzm=sqrt(currentWorker->toDouble(fz_r.getMagTmp()));
+        double fzzm=sqrt(currentWorker->toDouble(fzz_r.getMagTmp()));
+        newtres_.first_neumaier2_re=(fzm + sqrt(fzm*fzm+2*fm*fzzm))/fzzm;
+        newtres_.first_neumaier2_im=0;
+
+        /* naive: approximate f with c(x-a)^m
+        m=f'^2/(f'^2-f f'') = f'^2/f^2/(f'^2/f^2-f''/f)=G^2/H
+        x-a=m/(f'/f)=m/G=G/H    looks good if |m_im|<|m_re|
+        m*(x-a)=G^3/H^2
+
+        trouble: singularities when f f''=f'^2 -> m=infinity, iteration jumps too far
+                                    f'=0 -> m=0, m/(f/f') jumps too little
+        */
+        /*double g_re=currentWorker->toDouble(laguG.re_s);
+        double g_im=currentWorker->toDouble(laguG.im_s);
+        double g_mag=g_re*g_re+g_im*g_im;
+        if (1e6*H_mag<=g_mag*g_mag)
+        {
+          newtres_.first_naive_re=currentWorker->toDouble(r->re_s);
+          newtres_.first_naive_im=currentWorker->toDouble(r->im_s);
+        }
+        else
+        {
+          double g2_re=currentWorker->toDouble(laguG2.re_s);
+          double g2_im=currentWorker->toDouble(laguG2.im_s);
+          double h_re=currentWorker->toDouble(laguH.re_s);
+          double h_im=currentWorker->toDouble(laguH.im_s);
+
+          double m_re=(g2_re*h_re+g2_im*h_im)/H_mag;
+          double m_im=(g2_im*h_re-g2_re*h_im)/H_mag;
+          //couldn't find smooth function that:
+          //1->1 2->2 3->3... 0->1 -1->1 i->1 -i->1
+          //esp. since we need to have 1->1 exact and in neigborhood too
+          if ((m_re<abs(m_im)*2))
+          //if ((m_re<0.9) || (m_re<abs(m_im)*2)) //for m~0, we need something like sqrt(m): m is too small, 1 is too large
+          {
+            m_re=1;
+            m_im=0;
+          };
+          newtres_.first_naive_re=currentWorker->toDouble(r->re_s)-(m_re*g_re+m_im*g_im)/g_mag;
+          newtres_.first_naive_im=currentWorker->toDouble(r->im_s)-(m_im*g_re-m_re*g_im)/g_mag;
+        }*/
+
+        /* even naiver: show the 2 roots of c(x-a)(x-b) that have the same f, f', f''
+        w.l.o.g. x=0
+        c(x^2-(a+b)x+ab)=f''x^2/2+f'x+f
+        cx^2-c(a+b)x+cab=f''x^2/2+f'x+f
+        -f'/f''+-sqrt(f'^2/f''^2-2*f/f'')
+
+        if x1 close to x2 (relative to x), use (x1+x2)/2 else use x1
+        at |x1|=|x2|, 90 degrees..mult~2, use (x1+x2)/2
+        at |x1|=|x2|, 60 degrees..mult~1, use x1
+        at |x1|=0.8|x2|, 80% weight from x1
+        at |x1|=0.5|x2|, 90% weight from x1
+        at |x1|=0.3|x2|, use x1
+        when x1~x2, correct guess is actually around 0.7 x1
+        */
+        a_re=currentWorker->toDouble(fzz_r.re_s)/2;
+        a_im=currentWorker->toDouble(fzz_r.im_s)/2;
+        MandelMath::complex_double_quadratic2(&newtres_.first_naive1_re_, &newtres_.first_naive1_im,
+                                              &newtres_.first_naive2_re, &newtres_.first_naive2_im,
+                                              a_re, a_im, fz_re/2, fz_im/2, f_re, f_im);
+        double n2_rmag=1/(newtres_.first_naive2_re*newtres_.first_naive2_re+newtres_.first_naive2_im*newtres_.first_naive2_im);
+        //d=naive1/naive2
+        double d_re=(newtres_.first_naive1_re_*newtres_.first_naive2_re+newtres_.first_naive1_im*newtres_.first_naive2_im)*n2_rmag;
+        double d_im=(newtres_.first_naive1_im*newtres_.first_naive2_re-newtres_.first_naive1_re_*newtres_.first_naive2_im)*n2_rmag;
+        double d_mag=(d_re*d_re+d_im*d_im);
+        double w1=1, w2=0;
+        if (d_re<-0.5) //angle>120deg, even if close in magnitude
+        { w1=1; w2=0; newtres_.naiveChoice=NewtonNaiveChoice::ncWide; }
+        else if (d_mag<0.3*0.3)
+        { w1=1; w2=0; newtres_.naiveChoice=NewtonNaiveChoice::nc03; }
+        else if (d_mag<0.5*0.5)
+        { w1=0.9; w2=0.1; newtres_.naiveChoice=NewtonNaiveChoice::nc05; }
+        else if (d_mag<0.8*0.8)
+        { w1=0.8; w2=0.2; newtres_.naiveChoice=NewtonNaiveChoice::nc08; } //or just 1;0
+        else if (d_re<-0.1)
+        {
+          //most problematic case, some times best is [1,0] other times [1,1]
+          w1=1; w2=0.0;
+          newtres_.naiveChoice=NewtonNaiveChoice::nc100;
+        }
+        else if (d_re<0)
+        {
+          //most problematic case, some times best is [1,0] other times [1,1]
+          //don't trust M here
+          w1=1; w2=0.0;
+          newtres_.naiveChoice=NewtonNaiveChoice::nc90_;
+        }
+        else if (d_re<0.1)
+        {
+          //most problematic case, some times best is [1,0] other times [1,1]
+          //don't trust M here
+          w1=1; w2=0.0;
+          newtres_.naiveChoice=NewtonNaiveChoice::nc80;
+        }
+        else if (d_re<0.5)
+        {
+          //can (try) use M here
+          w1=1; w2=0;
+          newtres_.naiveChoice=NewtonNaiveChoice::nc60;
+        }
+        else
+        {
+          //can (try) use M here
+          w1=newtres_.firstM-1; w2=0;
+          newtres_.naiveChoice=NewtonNaiveChoice::ncClose;
+        }
+        newtres_.first_naive_re=w1*newtres_.first_naive1_re_+w2*newtres_.first_naive2_re;
+        newtres_.first_naive_im=w1*newtres_.first_naive1_im+w2*newtres_.first_naive2_im;
+        newtres_.first_naive1_re_=r_re+newtres_.first_naive1_re_;
+        newtres_.first_naive1_im=r_im+newtres_.first_naive1_im;
+        newtres_.first_naive2_re=r_re+newtres_.first_naive2_re;
+        newtres_.first_naive2_im=r_im+newtres_.first_naive2_im;
+        newtres_.first_naive_re=r_re+newtres_.first_naive_re;
+        newtres_.first_naive_im=r_im+newtres_.first_naive_im;
+
+        //Laguerre is the solution of
+        //   c=-n  b=f'/f  a=f'^2/f^2*(1-n/m+1/m)-f''/f*(1-n/m)=H*(1-n/m)+G^2/m
+        //   G=f'/f   H=G^2-f''/f
+        //>> a=H*(1-m/n)-G^2/n  b=m*G/n  c=-m    ok
+        /*
+        a_re=currentWorker->toDouble(laguH.re_s)*(1-m*order1)-currentWorker->toDouble(laguG2.re_s)*order1;
+        a_im=currentWorker->toDouble(laguH.im_s)*(1-m*order1)-currentWorker->toDouble(laguG2.im_s)*order1;
+        double b_re=currentWorker->toDouble(laguG.re_s)*m*order1;
+        double b_im=currentWorker->toDouble(laguG.im_s)*m*order1;
+        MandelMath::complex_double_quadratic(
+              &newtres_.first_lagum_re, &newtres_.first_lagum_im,
+              a_re, a_im,
+              b_re, b_im,
+              -m, 0);
+        newtres_.first_lagum_re=currentWorker->toDouble(r->re_s)-newtres_.first_lagum_re;
+        newtres_.first_lagum_im=currentWorker->toDouble(r->im_s)-newtres_.first_lagum_im;
+        */
+        a_re=currentWorker->toDouble(laguH.re_s)*(1-order1)-currentWorker->toDouble(laguG2.re_s)*order1;
+        a_im=currentWorker->toDouble(laguH.im_s)*(1-order1)-currentWorker->toDouble(laguG2.im_s)*order1;
+        double b_re=currentWorker->toDouble(laguG.re_s)*order1;
+        double b_im=currentWorker->toDouble(laguG.im_s)*order1;
+        MandelMath::complex_double_quadratic2(
+              &newtres_.first_lagu1_re, &newtres_.first_lagu1_im,
+              &newtres_.first_lagu1o_re, &newtres_.first_lagu1o_im,
+              a_re, a_im,
+              b_re, b_im,
+              -1, 0);
+        newtres_.first_lagu1_re=r_re-newtres_.first_lagu1_re;
+        newtres_.first_lagu1_im=r_im-newtres_.first_lagu1_im;
+        newtres_.first_lagu1o_re=r_re-newtres_.first_lagu1o_re;
+        newtres_.first_lagu1o_im=r_im-newtres_.first_lagu1o_im;
+      };
     if ((g_r_mag<1e-10) && (gz_r_mag<1e-6) && (trustedMultiplicity<=2))
     {
       trustedMultiplicity=m;
@@ -785,6 +1195,24 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       currentWorker->mul(newtX.re_s, &newt.tmp2);
       currentWorker->mul(newtX.im_s, &newt.tmp2);
       newt_valid=true;
+    };
+    if (newtonCycle==0)
+    {
+      currentWorker->assign(&newtres_.first_guess_newt_re, r->re_s);
+      currentWorker->assign(&newtres_.first_guess_newt_im, r->im_s);
+      if (newt_valid)
+      {
+        currentWorker->sub(&newtres_.first_guess_newt_re, newtX.re_s);
+        currentWorker->sub(&newtres_.first_guess_newt_im, newtX.im_s);
+      };
+
+      currentWorker->assign(&newtres_.first_guess_lagu_re, r->re_s);
+      currentWorker->assign(&newtres_.first_guess_lagu_im, r->im_s);
+      if (lagu_valid)
+      {
+        currentWorker->sub(&newtres_.first_guess_lagu_re, laguX.re_s);
+        currentWorker->sub(&newtres_.first_guess_lagu_im, laguX.im_s);
+      };
     };
     if (!newt_valid)
     {
@@ -872,7 +1300,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   };
 
   complex f_r(currentWorker, &newt.f_r_re, &newt.f_r_im, true);
-  complex fz_r(currentWorker, &newt.fz_r_re, &newt.fz_r_im, true);
+  complex fz_r(currentWorker, &newtres_.fz_r_re, &newtres_.fz_r_im, true);
   currentWorker->assign(f_r.re_s, root.re_s);
   currentWorker->assign(f_r.im_s, root.im_s);
   currentWorker->zero(fz_r.re_s, 1);
@@ -884,7 +1312,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   int firstBelow1dividing=-1;
   for (int i=0; i<period; i++)
   {
-    if (fz_mag && currentWorker->isl1(fz_mag)) //I think we intentionally skip last f_z_r
+    if (fz_mag && currentWorker->isl1(fz_mag)) //I think we intentionally skip last fz_mag
     {
       someBelow1=true;
       //if (firstBelow1<0)

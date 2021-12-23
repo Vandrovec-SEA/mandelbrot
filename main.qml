@@ -4,6 +4,7 @@ import QtQuick.Window 2.12
 
 import cz.seapraha.MandelImageCombiner 1.0;
 import cz.seapraha.MandelModel 1.0;
+import cz.seapraha.LaguerreModel 1.0;
 
 Window {
     width: 640
@@ -32,6 +33,28 @@ Window {
         }
     }
 
+    ButtonGroup { id: bgroupView }
+    Column {
+        anchors.left: toprow.right
+        anchors.top: parent.top;
+        id: rgroupView
+        RadioButton {
+            id: rbuttonViewMand
+            checked: true
+            text: "Mand"
+            height: 13
+            //implicitIndicatorHeight: 13
+            ButtonGroup.group: bgroupView
+        }
+        RadioButton {
+            id: rbuttonViewLagu
+            text: "Lagu"
+            height: 13
+            //implicitIndicatorWidth: 13
+            ButtonGroup.group: bgroupView
+        }
+    }
+
     ComboBox {
         anchors.right: parent.right
         textRole: "text"
@@ -48,12 +71,6 @@ Window {
         onActivated: mandelModel.selectedPaintStyle=mymodel.get(currentIndex).key;
     }
 
-        /*Text {
-            id: labelTimes;
-            width: 600;
-            text: "truff";
-        }*/
-
     MouseArea {
         id: mouseArea
         anchors.left: parent.left;
@@ -62,40 +79,55 @@ Window {
         anchors.bottom: parent.bottom;
         hoverEnabled: true;
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        property bool dragging: false;
+        property int dragging: 0;
         property int drag_last_x;
         property int drag_last_y;
         Keys.onPressed: { //never triggers
             console.log(event);
             if (event.key===Qt.Key_E)
-                mandelModel.paintOrbit(imageCombiner.getOverlayImage(), mouse.x, mouse.y);
+                mandelModel.paintOrbit(mandelImageCombiner.getOverlayImage(), mouse.x, mouse.y);
         }
         onPositionChanged:
         {
-            if (dragging)
+            if (dragging==1)
             {
                 mandelModel.drag(mouse.x-drag_last_x, mouse.y-drag_last_y);
+                drag_last_x=mouse.x;
+                drag_last_y=mouse.y;
+            };
+            if (dragging==2)
+            {
+                laguerreModel.drag(mouse.x-drag_last_x, mouse.y-drag_last_y);
                 drag_last_x=mouse.x;
                 drag_last_y=mouse.y;
             };
             //TODO: else copy from    ((mandel.mousePt.c.re<>view.orbit.re) or (mandel.mousePt.c.im<>view.orbit.im)) then
             //labelCX.text=mandelModel.pixelXtoRE_str(mouse.x);
             //labelCY.text=mandelModel.pixelYtoIM_str(mouse.y);
-            mandelModel.paintOrbit(imageCombiner.getOverlayImage(), mouse.x, mouse.y);
+            if (rbuttonViewMand.checked)
+              mandelModel.paintOrbit(mandelImageCombiner.getOverlayImage(), mouse.x, mouse.y);
+            if (rbuttonViewLagu.checked)
+              laguerreModel.paintOrbit(laguerreImageCombiner.getOverlayImage(), mouse.x, mouse.y);
             //labelCX.text=mouse.x;
             //labelCY.text=mouse.y;
         }
         onPressed: {
             if (mouse.button==Qt.LeftButton)
             {
-                dragging=true;
+                if (rbuttonViewMand.checked)
+                  dragging=1;
+                if (rbuttonViewLagu.checked)
+                  dragging=2;
                 drag_last_x=mouse.x;
                 drag_last_y=mouse.y;
-                mandelModel.paintOrbit(imageCombiner.getOverlayImage(), mouse.x, mouse.y);
+                if (rbuttonViewMand.checked)
+                  mandelModel.paintOrbit(mandelImageCombiner.getOverlayImage(), mouse.x, mouse.y);
+                if (rbuttonViewLagu.checked)
+                  laguerreModel.paintOrbit(laguerreImageCombiner.getOverlayImage(), mouse.x, mouse.y);
             };
         }
         onReleased: {
-            dragging=false;
+            dragging=0;
             if (mouse.button==Qt.RightButton)
             {
                 mainPopupMenu.popup(mouse.x, mouse.y);
@@ -104,26 +136,45 @@ Window {
 
         onWheel: {
             if (wheel.angleDelta.y>0)
-              mandelModel.zoom(wheel.x, wheel.y, +1);
+            {
+              if (rbuttonViewMand.checked)
+                mandelModel.zoom(wheel.x, wheel.y, +1);
+              else if (rbuttonViewLagu.checked)
+                laguerreModel.zoom(wheel.x, wheel.y, +1);
+            }
             else if (wheel.angleDelta.y<0)
-              mandelModel.zoom(wheel.x, wheel.y, -1);
+            {
+              if (rbuttonViewMand.checked)
+                mandelModel.zoom(wheel.x, wheel.y, -1);
+              else if (rbuttonViewLagu.checked)
+                laguerreModel.zoom(wheel.x, wheel.y, -1);
+            }
             wheel.accepted=true;
         }
         onHeightChanged: {
-            imageCombiner.resetBgImage(width, height, 0xff000000);
+            mandelImageCombiner.resetBgImage(width, height, 0xff000000);
             mandelModel.setImageSize(width, height);
-            mandelModel.writeToImage(imageCombiner.getBaseImage());
-            imageCombiner.update();
+            mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
+            mandelImageCombiner.update();
+            laguerreImageCombiner.resetBgImage(width, height, 0xff000000);
+            laguerreModel.setImageSize(width, height);
+            laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
+            laguerreImageCombiner.update();
         }
         onWidthChanged: {
-            imageCombiner.resetBgImage(width, height, 0xff000000);
+            mandelImageCombiner.resetBgImage(width, height, 0xff000000);
             mandelModel.setImageSize(width, height);
-            mandelModel.writeToImage(imageCombiner.getBaseImage());
-            imageCombiner.update();
+            mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
+            mandelImageCombiner.update();
+            laguerreImageCombiner.resetBgImage(width, height, 0xff000000);
+            laguerreModel.setImageSize(width, height);
+            laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
+            laguerreImageCombiner.update();
         }
 
         MandelImageCombiner {
-            id: imageCombiner;
+            id: mandelImageCombiner;
+            visible: rbuttonViewMand.checked
             Component.onCompleted: {
                 resetBgImage(width, height, 0xff000000);
                 mandelModel.setImageSize(width, height);
@@ -132,11 +183,26 @@ Window {
             anchors.fill: parent;
         }
 
+        MandelImageCombiner {
+            id: laguerreImageCombiner;
+            visible: rbuttonViewLagu.checked
+            Component.onCompleted: {
+                resetBgImage(width, height, 0xff000000);
+                laguerreModel.setImageSize(width, height);
+                //setBaseImage(mandelModel.getAsImage());
+            }
+            anchors.fill: parent;
+        }
+
         Menu {
             id: mainPopupMenu
-            MenuItem {
+            /*MenuItem {
                 text: "test1"
                 onTriggered: console.log("clicked test1");
+            }*/
+            MenuItem {
+                text: "set Lagu"
+                onTriggered: laguerreModel.setParams(mandelModel.viewInfo);
             }
             Menu {
                 title: "Presets..."
@@ -175,17 +241,31 @@ Window {
         id: mandelModel
     }
 
+    LaguerreModel {
+        id: laguerreModel
+    }
+
     Timer {
         interval: 100;
         repeat: true;
         running: true;
         onTriggered: {
-            mandelModel.writeToImage(imageCombiner.getBaseImage());
-            imageCombiner.update();
-            //labelTimes.text=mandelModel.getTimes();
-            labelXY.text=mandelModel.getTextXY();
-            labelInfoGen.text=mandelModel.getTextInfoGen();
-            labelInfoSpec.text=mandelModel.getTextInfoSpec();
+            if (rbuttonViewMand.checked)
+            {
+              mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
+              mandelImageCombiner.update();
+              labelXY.text=mandelModel.getTextXY();
+              labelInfoGen.text=mandelModel.getTextInfoGen();
+              labelInfoSpec.text=mandelModel.getTextInfoSpec();
+            };
+            if (rbuttonViewLagu.checked)
+            {
+              laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
+              laguerreImageCombiner.update();
+              labelXY.text=laguerreModel.getTextXY();
+              labelInfoGen.text=laguerreModel.getTextInfoGen();
+              labelInfoSpec.text=laguerreModel.getTextInfoSpec();
+            };
         }
     }
 }

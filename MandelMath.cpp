@@ -1,9 +1,10 @@
 #define assert(x) { if (!(x)) dbgPoint(); }
 #include "MandelMath.hpp"
 
-#include <cassert>
+//#include <cassert>
 #include <cmath>
 //#define assert(x) { }
+#define assert(x) { if (!(x)) dbgPoint(); }
 
 void doNothing(int &x)
 {
@@ -191,6 +192,17 @@ void number_worker_double::zero(number_store *store, double val)
   store->zero(number_worker::Type::typeDouble, val);
 }
 
+void number_worker_double::swap(number_store *store, number_store *src)
+{
+  assert(store);
+  assert(src);
+  assert(store->dbgType==Type::typeEmpty);
+  assert(src->dbgType==Type::typeDouble);
+  store->as.doubl=src->as.doubl;
+  store->dbgType=Type::typeDouble;
+  src->dbgType=Type::typeEmpty;
+}
+
 void number_worker_double::assign(number_store *store, const number_store *src)
 {
   assert(store);
@@ -336,6 +348,19 @@ void number_worker_ddouble::zero(number_store *store, double val)
   store->zero(number_worker::Type::typeDDouble, val);
 }
 
+void number_worker_ddouble::swap(number_store *store, number_store *src)
+{
+  assert(store);
+  assert(src);
+  assert(store->dbgType==Type::typeEmpty);
+  assert(src->dbgType==Type::typeDDouble);
+  assert(store->as.ddouble_.dd==nullptr);
+  store->as.ddouble_.dd=src->as.ddouble_.dd;
+  src->as.ddouble_.dd=nullptr;
+  store->dbgType=Type::typeDDouble;
+  src->dbgType=Type::typeEmpty;
+}
+
 void number_worker_ddouble::assign(number_store *store, const number_store *src)
 {
   assert(store);
@@ -477,6 +502,19 @@ void number_worker_multi::init(number_store *store, double val)
 void number_worker_multi::zero(number_store *store, double val)
 {
   store->zero(Type::typeMulti, val);
+}
+
+void number_worker_multi::swap(number_store *store, number_store *src)
+{
+  assert(store);
+  assert(src);
+  assert(store->dbgType==Type::typeEmpty);
+  assert(src->dbgType==Type::typeMulti);
+  assert(store->as.multi_.bytes==nullptr);
+  store->as.multi_.bytes=src->as.multi_.bytes;
+  src->as.multi_.bytes=nullptr;
+  store->dbgType=Type::typeMulti;
+  src->dbgType=Type::typeEmpty;
 }
 
 void number_worker_multi::assign(number_store *store, const number_store *src)
@@ -781,6 +819,122 @@ void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in
       *res_im=-t1;
     };
   };
+}
+
+/*
+ finds smaller (in abs) root of ax^2+2bx+c=0
+*/
+void complex_double_quadratic(double *res_re, double *res_im,
+                              double a_re, double a_im, double b2_re, double b2_im, double c_re, double c_im)
+{
+  /*
+  a x^2 + 2 b x + c = 0
+  x1,x2= -(b +- sqrt(b^2-a*c))/a
+  for small a
+  x1,x2= -b*(1 +- sqrt(1-a*c/b^2))/a
+  x1,x2= -b*(1 +- sqrt(1-a*c/b^2))/(a*c/b^2)*c/b^2
+  HELP(x)=(1+-sqrt(1-x))/x =1/(1-+sqrt(1-x))
+  x1,x2= -c/b*HELP(a*c/b^2)   or rather, for a<b, c<b
+  for b<a
+  (F1)  x1,x2= -(b/a +- sqrt(b^2/a^2-c/a))     good for a>b, c>b until ~ c>b^2/a
+  (F1') x1,x2= -(1/a)*(b - sqrt(b^2-a*c))      good for b^2<<a*c
+  (F2)  x1,x2= -(b/a)*(1 +- sqrt(1-a*c/b^2))   good for a>b, c<b^2/a
+  for b>a  b^2/a>b
+  x1,x2= -b*(1 +- sqrt(1-a*c/b^2))/a/c*b^2*c/b^2
+        x1,x2= -(c/b)*HELP(a*c/b^2)            good for c<b, until c<b^2/a
+  (F3)  x1=    -(c/b)/(1+sqrt(1-a*c/b^2))      good for b>0 (cancellation for x2)
+  (F3')        -(c)/(b+-sqrt(b^2-a*c))         good except both b,c small e.g. 0
+
+  Muller's method: B=2b
+  x1,x2= c/(-b+-sqrt(b^2-ac))     -c/(b+sqrt(b^2-ac))
+  x1,x2= c/b/(-1+-sqrt(1-ac/b^2))
+  */
+  double bb_re=b2_re*b2_re-b2_im*b2_im;
+  double bb_im=2*b2_re*b2_im;
+  double bbac_re=bb_re-a_re*c_re+a_im*c_im;
+  double bbac_im=bb_im-a_im*c_re-a_re*c_im; //b^2-ac
+  double d_re, d_im;
+  complex_double_sqrt(&d_re, &d_im, bbac_re, bbac_im);
+  double t1_re, t1_im;
+  if (b2_re*d_re+b2_im*d_im<0)//if (b2_re<0)
+  {
+    t1_re=b2_re-d_re;
+    t1_im=b2_im-d_im;
+  }
+  else
+  {
+    t1_re=b2_re+d_re;
+    t1_im=b2_im+d_im;
+  }
+  double am=a_re*a_re+a_im*a_im;
+  double t1m=t1_re*t1_re+t1_im*t1_im;
+  if (t1m>am)
+  { //F3'
+    *res_re=-(c_re*t1_re+c_im*t1_im)/t1m;
+    *res_im=-(c_im*t1_re-c_re*t1_im)/t1m; //-c/(b+sqrt(b^2-a*c))
+  }
+  else
+  {
+    t1_re=2*b2_re-t1_re;//b2_re-d_re;
+    t1_im=2*b2_im-t1_im;//b2_im-d_im;
+    *res_re=-(t1_re*a_re+t1_im*a_im)/am;
+    *res_im=-(t1_im*a_re-t1_re*a_im)/am; //-(b - sqrt(b^2-a*c))/a
+  }
+}
+
+/*
+ finds both roots of ax^2+2bx+c=0
+*/
+void complex_double_quadratic2(double *res1_re, double *res1_im,
+                               double *res2_re, double *res2_im,
+                               double a_re, double a_im, double b2_re, double b2_im, double c_re, double c_im)
+{
+  //see complex_double_quadratic()
+  double bb_re=b2_re*b2_re-b2_im*b2_im;
+  double bb_im=2*b2_re*b2_im;
+  double bbac_re=bb_re-a_re*c_re+a_im*c_im;
+  double bbac_im=bb_im-a_im*c_re-a_re*c_im; //b^2-ac
+  double d_re, d_im;
+  complex_double_sqrt(&d_re, &d_im, bbac_re, bbac_im);
+  double t1_re, t1_im;
+  double t2_re, t2_im;
+  if (b2_re*d_re+b2_im*d_im<0)//if (b2_re<0)
+  {
+    t1_re=b2_re-d_re;
+    t1_im=b2_im-d_im;
+    t2_re=b2_re+d_re;
+    t2_im=b2_im+d_im;
+  }
+  else
+  {
+    t1_re=b2_re+d_re;
+    t1_im=b2_im+d_im;
+    t2_re=b2_re-d_re;
+    t2_im=b2_im-d_im;
+  }
+  double am=a_re*a_re+a_im*a_im;
+  double t1m=t1_re*t1_re+t1_im*t1_im;
+  if (t1m>am)
+  { //F3'
+    *res1_re=-(c_re*t1_re+c_im*t1_im)/t1m;
+    *res1_im=-(c_im*t1_re-c_re*t1_im)/t1m; //-c/(b+sqrt(b^2-a*c))
+  }
+  else
+  {
+    *res1_re=-(t2_re*a_re+t2_im*a_im)/am;
+    *res1_im=-(t2_im*a_re-t2_re*a_im)/am; //-(b - sqrt(b^2-a*c))/a
+  }
+  double t2m=t2_re*t2_re+t2_im*t2_im;
+  if (t2m>am)
+  { //F3'
+    *res2_re=-(c_re*t2_re+c_im*t2_im)/t2m;
+    *res2_im=-(c_im*t2_re-c_re*t2_im)/t2m; //-c/(b+sqrt(b^2-a*c))
+  }
+  else
+  {
+    *res2_re=-(t1_re*a_re+t1_im*a_im)/am;
+    *res2_im=-(t1_im*a_re-t1_re*a_im)/am; //-(b - sqrt(b^2-a*c))/a
+  }
 }
 
 #else //COMPLEX_IS_TEMPLATE

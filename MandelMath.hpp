@@ -19,11 +19,13 @@ class number_worker
 {
 public:
   enum Type { typeEmpty, typeDouble, typeDDouble, typeMulti };
+  virtual double eps2() { return 1.23e-32; }
 
   number_worker() { }
   virtual Type ntype() { return typeEmpty; }
   virtual void init(number_store *store, double val=0)=0;
   virtual void zero(number_store *store, double val=0)=0;
+  virtual void swap(number_store *store, number_store *src)=0; //dst uninit + src init -> dst init + src uninit
   virtual void assign(number_store *store, const number_store *src)=0;
   //virtual void assignTo(number_store *src)=0;
   virtual void cleanup(number_store *store)=0;
@@ -105,12 +107,15 @@ public:
 class number_worker_double: public number_worker
 {
 public:
+  double eps2() override { return 1.23e-32;  /* 2^-(2*53) */ }
+
   number_worker_double() {}
   //{ assert((store->dbgType==Type::typeDouble) ||
   //         (store->dbgType==Type::typeEmpty)); }
   virtual Type ntype() override { return typeDouble; }
   void init(number_store *store, double val=0) override;
   void zero(number_store *store, double val=0) override;
+  void swap(number_store *store, number_store *src) override; //dst uninit + src init -> dst init + src uninit
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_double>(*src); };
   //void assignTo(number_store *src) override { store->assignTo_double(*src); };
   void cleanup(number_store *store) override { store->cleanup(Type::typeDouble); }
@@ -139,12 +144,14 @@ public:
 class number_worker_ddouble: public number_worker
 {
 public:
+  double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
   number_worker_ddouble() {}
   //{ assert((store->dbgType==Type::typeDDouble) ||
   //         (store->dbgType==Type::typeEmpty)); }
   virtual Type ntype() override { return typeDDouble; }
   void init(number_store *store, double val=0) override;
   void zero(number_store *store, double val=0) override;
+  void swap(number_store *store, number_store *src) override; //dst uninit + src init -> dst init + src uninit
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_ddouble>(*src); };
   //void assignTo(number_store *src) override { store->assignTo_ddouble(*src); };
   void cleanup(number_store *store) override { store->cleanup(Type::typeDDouble); }
@@ -173,12 +180,14 @@ public:
 class number_worker_multi: public number_worker
 {
 public:
+  double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
   number_worker_multi() {}
   //{ assert((store->dbgType==Type::typeMulti) ||
   //         (store->dbgType==Type::typeEmpty)); }
   virtual Type ntype() override { return typeMulti; }
   void init(number_store *store, double val=0) override;
   void zero(number_store *store, double val=0) override;
+  void swap(number_store *store, number_store *src) override; //dst uninit + src init -> dst init + src uninit
   void assign(number_store *store, const number_store *src) override;// { store->assign<number_multi>(*src); };;
   //void assignTo(number_store *src) override { store->assignTo_multi(*src); };;
   void cleanup(number_store *store) override { store->cleanup(Type::typeMulti); }
@@ -219,6 +228,11 @@ template <> struct number_to_type<number_worker_multi>
 */
 
 void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in_im); //res_re>=0
+void complex_double_quadratic(double *res_re, double *res_im,
+                              double a_re, double a_im, double b2_re, double b2_im, double c_re, double c_im);
+void complex_double_quadratic2(double *res1_re, double *res1_im,
+                               double *res2_re, double *res2_im,
+                               double a_re, double a_im, double b2_re, double b2_im, double c_re, double c_im);
 
 #define COMPLEX_IS_TEMPLATE 0 //virtual or templated class complex
 #if !COMPLEX_IS_TEMPLATE

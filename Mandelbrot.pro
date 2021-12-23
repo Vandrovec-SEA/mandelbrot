@@ -11,6 +11,7 @@ CONFIG += c++11
 #QMAKE_CFLAGS_DEBUG += -O9
 
 SOURCES += \
+        LaguerreModel.cpp \
         MandelEvaluator.cpp \
         MandelImageCombiner.cpp \
         MandelMath.cpp \
@@ -34,6 +35,7 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
 HEADERS += \
+  LaguerreModel.hpp \
   MandelEvaluator.hpp \
   MandelImageCombiner.hpp \
   MandelMath.hpp \

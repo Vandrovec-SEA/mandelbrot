@@ -6,26 +6,26 @@
 #include "MandelMath.hpp"
 #include "double_double.hpp"
 
-namespace MandelMath
+enum NewtonNaiveChoice { nc03, nc05, nc08, ncWide, nc100, nc90_, nc80, nc60, ncClose };
+
+struct LaguerrePoint
 {
-/*
-struct number_any
-{
-protected:
-  number_store my_store;
-public:
-  //number_any(MandelMath::number_store::DbgType ntype, MandelMath::number_store *src);
-  number_any();
-  number_any(number_store *store);
-  number_any(number_any *src);
-  ~number_any();
-  number_worker *impl;
-  number_store *store;
-  void reinit(number_worker *worker);
-  number_worker *ntype_();
+  LaguerrePoint();
+  enum State { stUnknown, stResolved, stFail } state;
+  MandelMath::number_store f_re, f_im;
+  MandelMath::number_store fz_r_re, fz_r_im;
+  double firstM;
+  NewtonNaiveChoice naiveChoice;
+  //MandelMath::number_store fz_c_mag;
+  //int period;
+  //MandelMath::number_store root_re, root_im;
+  int iter;
+  LaguerrePoint &operator =(LaguerrePoint &src) = delete;
+  void assign(MandelMath::number_worker *worker, const LaguerrePoint &src);
+  void init(MandelMath::number_worker *worker);
+  void zero(MandelMath::number_worker *worker, const MandelMath::number_store *c_re, const MandelMath::number_store *c_im);
+  void cleanup(MandelMath::number_worker *worker);
 };
-*/
-} //namespace MandelMath
 
 struct MandelPoint
 {
@@ -51,6 +51,24 @@ struct MandelPoint
   void zero(MandelMath::number_worker *worker, const MandelMath::number_store *c_re, const MandelMath::number_store *c_im);
   void cleanup(MandelMath::number_worker *worker);
 };
+
+class ShareableViewInfo: public QObject
+{
+  Q_OBJECT
+public:
+  ShareableViewInfo();
+  ShareableViewInfo(ShareableViewInfo &src);
+  ShareableViewInfo(const ShareableViewInfo &src);
+  ShareableViewInfo(ShareableViewInfo &&src); //important
+  ShareableViewInfo &operator=(ShareableViewInfo &src);
+  ShareableViewInfo &operator=(ShareableViewInfo &&src);
+  MandelMath::number_worker *worker;
+  MandelMath::number_store re_, im;
+  MandelMath::number_store root_re, root_im;
+  double scale;
+  int period;
+};
+Q_DECLARE_METATYPE(ShareableViewInfo);
 
 class MandelEvaluator: public QThread
 {
@@ -89,6 +107,23 @@ public:
   MandelPoint currentData;
 
   bool startCompute(const MandelPoint *data, int quick_route); //qr: -1..never 0..auto 1..always
+  int newton(int period, const MandelMath::complex *c, MandelMath::complex *r, const bool fastHoming, const int suggestedMultiplicity);
+  struct NewtRes
+  {
+    int cyclesNeeded;
+    double firstM;
+    MandelMath::number_store fz_r_re, fz_r_im;
+    MandelMath::number_store first_guess_lagu_re, first_guess_lagu_im;
+    MandelMath::number_store first_guess_newt_re, first_guess_newt_im;
+    double first_fejer_re, first_fejer_im;
+    double first_naive1_re_, first_naive1_im, first_naive2_re, first_naive2_im, first_naive_re, first_naive_im;
+    NewtonNaiveChoice naiveChoice;
+    double first_neumaier1_re_, first_neumaier1_im_; //circle enclosing 1 but not 2 roots (approx)
+    double first_neumaier2_re, first_neumaier2_im;   //circle enclosing 2 but not 3 roots (approx) (never valid without  f''')
+    //double first_lagum_re, first_lagum_im;
+    double first_lagu1_re, first_lagu1_im, first_lagu1o_re, first_lagu1o_im;
+    double firstMu_re, firstMu_im;
+  } newtres_;
 protected:
   typedef MandelMath::complex complex;
   struct
@@ -106,7 +141,7 @@ protected:
   {
     MandelMath::number_store bestr_re, bestr_im;
     MandelMath::number_store f_r_re, f_r_im;
-    MandelMath::number_store fz_r_re, fz_r_im;
+    //MandelMath::number_store fz_r_re, fz_r_im;
     MandelMath::number_store fzz_r_re, fzz_r_im;
     MandelMath::number_store tmp1_re, tmp1_im;
     MandelMath::number_store fzfix_re, fzfix_im;
@@ -124,7 +159,6 @@ protected:
     MandelMath::number_store fz_re, fz_im, fz_mag;
   } interior;
 
-  int newton(int period, const complex *c, complex *r, const bool fastHoming, const int suggestedMultiplicity);
   int periodCheck(int period, const complex *c);
   int estimateInterior(int period, const complex *c, const complex *root);//, InteriorInfo *interior);
   void eval_until_bailout(complex *c, complex *f, complex *fc_c);

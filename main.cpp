@@ -3,6 +3,7 @@
 
 #include "MandelImageCombiner.hpp"
 #include "MandelModel.hpp"
+#include "LaguerreModel.hpp"
 #include "ShareableImageWrapper.hpp"
 
 int main(int argc, char *argv[])
@@ -15,7 +16,9 @@ int main(int argc, char *argv[])
 
   qmlRegisterType<MandelImageCombiner>("cz.seapraha.MandelImageCombiner", 1, 0, "MandelImageCombiner");
   qmlRegisterType<MandelModel>("cz.seapraha.MandelModel", 1, 0, "MandelModel");
+  qmlRegisterType<LaguerreModel>("cz.seapraha.LaguerreModel", 1, 0, "LaguerreModel");
   qRegisterMetaType<ShareableImageWrapper>();
+  qRegisterMetaType<ShareableViewInfo>();
 
   QQmlApplicationEngine engine;
   const QUrl url(QStringLiteral("qrc:/main.qml"));

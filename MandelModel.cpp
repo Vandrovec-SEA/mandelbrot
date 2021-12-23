@@ -5,7 +5,6 @@
 
 #include "MandelModel.hpp"
 #include "MandelEvaluator.hpp"
-#include "double_double.hpp"
 
 int ctz16(int x)
 {
@@ -218,7 +217,14 @@ MandelModel::~MandelModel()
   orbit.evaluator.quit();
   orbit.evaluator.wait(1000);
   if (orbit.worker!=nullptr)
+  {
     orbit.pointData.cleanup(orbit.worker);
+    orbit.worker->cleanup(&orbit.tmp);
+    orbit.worker->cleanup(&orbit.lagu_r_im);
+    orbit.worker->cleanup(&orbit.lagu_r_re);
+    orbit.worker->cleanup(&orbit.lagu_c_im);
+    orbit.worker->cleanup(&orbit.lagu_c_re_);
+  };
 
   for (int i=imageWidth*imageHeight-1; i>=0; i--)
   {
@@ -362,6 +368,27 @@ QString MandelModel::getTextInfoSpec()
       return " "; break;
   }
   return "-?-?-";
+}
+
+ShareableViewInfo MandelModel::getViewInfo()
+{
+  ShareableViewInfo result;
+  result.worker=orbit.worker;
+  result.period=orbit.pointData.period;
+  result.scale=position.step_size__;
+  orbit.worker->init(&result.re_);
+  orbit.worker->init(&result.im);
+  orbit.worker->init(&result.root_re);
+  orbit.worker->init(&result.root_im);
+  orbit.worker->assign(&result.re_, &orbit.evaluator.currentParams.c_re);
+  orbit.worker->assign(&result.im, &orbit.evaluator.currentParams.c_im);
+  orbit.worker->assign(&result.root_re, &orbit.evaluator.currentData.root_re);
+  orbit.worker->assign(&result.root_im, &orbit.evaluator.currentData.root_im);
+  orbit.worker->assign(&orbit.lagu_c_re_, &orbit.evaluator.currentParams.c_re);
+  orbit.worker->assign(&orbit.lagu_c_im, &orbit.evaluator.currentParams.c_im);
+  orbit.worker->assign(&orbit.lagu_r_re, &orbit.evaluator.currentData.root_re);
+  orbit.worker->assign(&orbit.lagu_r_im, &orbit.evaluator.currentData.root_im);
+  return result;
 }
 
 void MandelModel::transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
@@ -552,7 +579,7 @@ void MandelModel::setImageSize(int width, int height)
   {
     size_as_text.insert(pos, '\'');
   }
-  qDebug()<<"pointStore uses "<<size_as_text.constData()<<" B";
+  qDebug()<<"pointStore uses"<<size_as_text.toLocal8Bit().constData()<<"B"; //lots of work to skip those quotes... can't skip spaces at all
   for (int i=0; i<newLength; i++)
     newStore[i].init(position.worker);
 
@@ -602,6 +629,38 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     painter.fillRect(0, 0, imageWidth, imageHeight, Qt::GlobalColor::transparent);
   };
 
+/*  {
+    painter.setPen(QColor(0xff, 0xff, 0xff));
+    painter.fillRect(0, 0, 20+6*10, 20, Qt::GlobalColor::black);
+    for (int i=0; i<6; i++)
+    {
+      newOverlay.setPixel(10+10*i, 10-5, 0x00ffffff);
+      newOverlay.setPixel(10+10*i-1, 10+5, 0x00ffffff);
+      newOverlay.setPixel(10+10*i+1, 10+5, 0x00ffffff);
+
+      switch (i)
+      {
+        case 0: painter.drawLine(10+10*i-2, 10+3, 10+10*i, 10-3); break;
+        case 1: painter.drawLine(10+10*i, 10-3, 10+10*i-2, 10+3); break;
+        case 2: painter.drawLine(10+10*i+2, 10+3, 10+10*i, 10-3); break;
+        case 3: painter.drawLine(10+10*i, 10-3, 10+10*i+2, 10+3); break;
+        case 4:
+        {
+          QLine l3[3]={{10+10*i+1, 10-1, 10+10*i-1, 10-1},
+                       {10+10*i-1, 10-1, 10+10*i-1, 10+1},
+                       {10+10*i-1, 10+1, 10+10*i+1, 10+1}};
+          painter.drawLines(l3, 3);
+        } break;
+        case 5:
+        {
+          QLine l2[2]={{10+10*i-2, 10, 10+10*i+2, 10},
+                       {10+10*i, 10-2, 10+10*i, 10+2}};
+          painter.drawLines(l2, 2);
+        } break;
+      }
+    }
+  }*/
+
   /*/fillRect(transparent) does nothing, does not clear the image
   painter.setPen(QColor("cyan"));
   painter.setBrush(QBrush(QColor("yellow")));
@@ -618,9 +677,19 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     if (orbit.worker)
     {
       orbit.pointData.cleanup(orbit.worker);
+      orbit.worker->cleanup(&orbit.tmp);
+      orbit.worker->cleanup(&orbit.lagu_r_im);
+      orbit.worker->cleanup(&orbit.lagu_r_re);
+      orbit.worker->cleanup(&orbit.lagu_c_im);
+      orbit.worker->cleanup(&orbit.lagu_c_re_);
     };
     orbit.pointData.init(position.worker);
     orbit.worker=position.worker;
+    orbit.worker->init(&orbit.lagu_c_re_);
+    orbit.worker->init(&orbit.lagu_c_im);
+    orbit.worker->init(&orbit.lagu_r_re);
+    orbit.worker->init(&orbit.lagu_r_im);
+    orbit.worker->init(&orbit.tmp);
   };
   switch (data->state)
   {
@@ -663,6 +732,49 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
     if (orbit.pointData.state!=MandelPoint::State::stUnknown)
       break;
+  }
+
+  if (!orbit.worker->is0(&orbit.lagu_c_re_) ||
+      !orbit.worker->is0(&orbit.lagu_c_im))
+  {
+    int circ_x, circ_y;
+    painter.setBrush(Qt::BrushStyle::NoBrush);
+    painter.setPen(QColor(0, 0xff, 0)); //paint c
+    position.worker->assign(&orbit.tmp, &orbit.lagu_c_re_);
+    position.worker->sub(&orbit.tmp, &position.center_re_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    circ_x=position.worker->toDouble(&orbit.tmp)+imageWidth/2;
+    position.worker->assign(&orbit.tmp, &orbit.lagu_c_im);
+    position.worker->sub(&orbit.tmp, &position.center_im_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    circ_y=imageHeight/2-position.worker->toDouble(&orbit.tmp);
+    if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
+    {
+      painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
+      QLine l3[3]={{circ_x+1, circ_y-1, circ_x-1, circ_y-1},
+                   {circ_x-1, circ_y-1, circ_x-1, circ_y+1},
+                   {circ_x-1, circ_y+1, circ_x+1, circ_y+1}};
+      painter.drawLines(l3, 3);
+    };
+
+    painter.setBrush(Qt::BrushStyle::NoBrush);
+    painter.setPen(QColor(0, 0xff, 0)); //paint root as /\    .
+    position.worker->assign(&orbit.tmp, &orbit.lagu_r_re);
+    position.worker->sub(&orbit.tmp, &position.center_re_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    circ_x=position.worker->toDouble(&orbit.tmp)+imageWidth/2;
+    position.worker->assign(&orbit.tmp, &orbit.lagu_r_im);
+    position.worker->sub(&orbit.tmp, &position.center_im_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    circ_y=imageHeight/2-position.worker->toDouble(&orbit.tmp);
+    if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
+    {
+      painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
+      QLine l2[2]={{circ_x-2, circ_y, circ_x+2, circ_y},
+                   {circ_x, circ_y-2, circ_x, circ_y+2}};
+      painter.drawLines(l2, 2);
+    };
+
   }
   //donePixel1(&orbit.evaluator);
   //orbit.pointData.cleanup(position.worker);

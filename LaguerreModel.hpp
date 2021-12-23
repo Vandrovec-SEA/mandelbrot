@@ -1,5 +1,5 @@
-#ifndef MANDELMODEL_H
-#define MANDELMODEL_H
+#ifndef LAGUERREMODEL_H
+#define LAGUERREMODEL_H
 
 #include <QObject>
 #include <QImage>
@@ -7,20 +7,22 @@
 #include "ShareableImageWrapper.hpp"
 #include "MandelEvaluator.hpp"
 
-class MandelModel: public QObject
+class LaguerreModel: public QObject
 {
   Q_OBJECT
 public:
-  MandelModel();
-  ~MandelModel();
-  void transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
-                      MandelPoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
+  LaguerreModel();
+  ~LaguerreModel();
+  Q_INVOKABLE void setParams(ShareableViewInfo viewInfo);
+  void transformStore(LaguerrePoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
+                      LaguerrePoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
                       int inlog, int new_step_log);
   Q_INVOKABLE void setView(double c_re, double c_im, double scale);
   Q_INVOKABLE void drag(double delta_x, double delta_y);
   Q_INVOKABLE void zoom(double x, double y, int inlog);
   Q_INVOKABLE void setImageSize(int width, int height);
   void startNewEpoch();
+  void giveWorkAll();
   Q_INVOKABLE void writeToImage(ShareableImageWrapper img);
   Q_INVOKABLE void paintOrbit(ShareableImageWrapper image, int x, int y);
   Q_INVOKABLE QString pixelXtoRE_str(int x);
@@ -29,16 +31,10 @@ public:
   Q_INVOKABLE QString getTextXY();
   Q_INVOKABLE QString getTextInfoGen();
   Q_INVOKABLE QString getTextInfoSpec();
-  ShareableViewInfo getViewInfo();
-  Q_PROPERTY(ShareableViewInfo viewInfo READ getViewInfo CONSTANT)// WRITE setViewInfo NOTIFY viewInfoChanged)
 
   enum paintStyle
   {
-    paintStyleKind=0,
-    paintStyleCls=1,
-    paintStyleExter=2,
-    paintStyleInter=3,
-    paintStyleNear=4
+    paintStyleCls=0
   };
   Q_ENUM(paintStyle);
   paintStyle _selectedPaintStyle;
@@ -46,8 +42,6 @@ public:
   paintStyle getselectedPaintStyle() { return _selectedPaintStyle; }
   void setselectedPaintStyle(paintStyle ps) { _selectedPaintStyle=ps; }
 
-  QVector<int> periodToIndexCache;
-  int periodToIndex(int period);
   void giveWork(MandelEvaluator *worker);
   void donePixel1(MandelEvaluator *me);
 public slots:
@@ -60,13 +54,21 @@ protected:
   int epoch;
   int imageWidth;
   int imageHeight;
-  MandelPoint *pointStore;
+  LaguerrePoint *pointStore;
   int lastGivenPointIndex_;
-  int effortBonus;
-  constexpr static int MAX_EFFORT=17;//18;
+  //int effortBonus;
+  //constexpr static int MAX_EFFORT=17;//18;
   int threadCount;
   MandelEvaluator *threads;
 
+  struct
+  {
+    int period;
+    MandelMath::number_store base_re_s_;
+    MandelMath::number_store base_im_s;
+    MandelMath::number_store root_re_s;
+    MandelMath::number_store root_im_s;
+  } params;
   struct Position
   {
     //MandelMath::number_store center_re_s;
@@ -95,13 +97,9 @@ protected:
   {
     MandelMath::number_worker *worker;
     MandelEvaluator evaluator;
-    MandelPoint pointData;
-    MandelMath::number_store lagu_c_re_, lagu_c_im;
-    MandelMath::number_store lagu_r_re, lagu_r_im;
-    MandelMath::number_store tmp;
+    LaguerrePoint pointData;
+    double first_mu_re, first_mu_im;
   } orbit;
 };
 
-
-
-#endif // MANDELMODEL_H
+#endif // LAGUERREMODEL_H
