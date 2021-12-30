@@ -1753,7 +1753,7 @@ void MandelEvaluator::evaluate()
     if (currentData.iter%(3*currentData.near0iter) ==0)
     {
       int quot=currentData.iter/(3*currentData.near0iter);
-      if ((quot&(quot-1))==0) //also at iter==0
+      if ((quot&(quot-1))==0) //also at iter==0  //TODO: maybe better 3*(2^k-1)*near not 3*(2^k)*near
       { // //need k*iter for f' to start at the worst moment to reduce false positives; need k*iter-1 for good near0 -> switch to nearc
         currentData.lookper_startiter=currentData.iter;
         currentWorker->assign(&currentData.lookper_startf_re, f.re_s);
@@ -1766,7 +1766,7 @@ void MandelEvaluator::evaluate()
         if (currentData.iter<=1)
           currentWorker->assign(&currentData.lookper_nearr_dist, f.getMagTmp());
         else
-          currentWorker->assign(&currentData.lookper_nearr_dist, f.dist2_tmp(&c));
+          currentData.lookper_nearr_dist_touched=false;//currentWorker->assign(&currentData.lookper_nearr_dist, f.dist2_tmp(&c));
         //currentWorker->zero(&eval.lookper_dist2, 1e10); //4.0 should be enough
         //mands.period stays there
         //currentData.lookper_prevGuess=0; //TODO: used for anything?
@@ -1891,7 +1891,7 @@ void MandelEvaluator::evaluate()
     };
 
     const MandelMath::number_store *lpdiff=lookper_startf.dist2_tmp(&f);
-    if (!currentWorker->isle(&currentData.lookper_nearr_dist, lpdiff)) //|f-r|<best
+    switch (currentWorker->cmp(&currentData.lookper_nearr_dist, lpdiff)) //|f-r|<best
     {
       currentWorker->assign(&eval.lookper_nearr_re, f.re_s);
       currentWorker->assign(&eval.lookper_nearr_im, f.im_s);

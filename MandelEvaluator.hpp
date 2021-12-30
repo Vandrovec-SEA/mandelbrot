@@ -36,10 +36,10 @@ struct MandelPoint
   MandelMath::number_store fz_c_mag;
   int lookper_startiter, lookper_prevGuess_, lookper_lastGuess;
   MandelMath::number_store lookper_startf_re, lookper_startf_im;
-  MandelMath::number_store lookper_nearr_dist;
+  MandelMath::number_store lookper_nearr_dist_; z bool lookper_nearr_dist_touched;
   MandelMath::number_store lookper_totalFzmag;
   int near0iter;
-  MandelMath::number_store near0f_re, near0f_im;
+  MandelMath::number_store near0f_re, near0f_im; //TODO: delete? useless
   int period;
   MandelMath::number_store root_re, root_im;
   int iter;
