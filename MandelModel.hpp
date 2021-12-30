@@ -55,14 +55,14 @@ public slots:
 signals:
   void selectedPaintStyleChanged();
 protected:
-  constexpr static int MAX_ZOOM_IN_DOUBLE=53;
+  constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
   MandelPoint *pointStore;
   int lastGivenPointIndex_;
-  int effortBonus;
+  int effortBonus_;
   constexpr static int MAX_EFFORT=17;//18;
   int threadCount;
   MandelEvaluator *threads;

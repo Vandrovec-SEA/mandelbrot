@@ -43,20 +43,20 @@ public:
   void setselectedPaintStyle(paintStyle ps) { _selectedPaintStyle=ps; }
 
   void giveWork(MandelEvaluator *worker);
-  void donePixel1(MandelEvaluator *me);
+  void donePixel1(MandelEvaluator *me, int result);
 public slots:
-  void donePixel(MandelEvaluator *me);
+  void donePixel(MandelEvaluator *me, int result);
 signals:
   void selectedPaintStyleChanged();
 protected:
-  constexpr static int MAX_ZOOM_IN_DOUBLE=53;
+  constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
   LaguerrePoint *pointStore;
   int lastGivenPointIndex_;
-  //int effortBonus;
+  int effortBonus;
   //constexpr static int MAX_EFFORT=17;//18;
   int threadCount;
   MandelEvaluator *threads;
@@ -98,8 +98,12 @@ protected:
     MandelMath::number_worker *worker;
     MandelEvaluator evaluator;
     LaguerrePoint pointData;
-    double first_mu_re, first_mu_im;
+    double first_mu_re_, first_mu_im, first_mum_re_, first_mum_im_;
   } orbit;
+signals:
+  void doneWork(MandelEvaluator *evaluator);
+protected slots:
+  void giveWork1(MandelEvaluator *me) { giveWork(me); }
 };
 
 #endif // LAGUERREMODEL_H

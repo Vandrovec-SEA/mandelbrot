@@ -12,6 +12,8 @@ void dbgPoint();
 namespace MandelMath {
 
 //double two_pow_n(unsigned int n);
+int gcd(int m, int n);
+int ctz16(int x);
 
 struct number_store;
 

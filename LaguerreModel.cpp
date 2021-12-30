@@ -16,25 +16,33 @@ LaguerreModel::LaguerreModel(): QObject(), position()
   imageHeight=0;
   pointStore=nullptr;
   lastGivenPointIndex_=0;
-  //effortBonus=0;
+  effortBonus=0;
   orbit.worker=nullptr;
+  orbit.first_mu_re_=0;
+  orbit.first_mu_im=0;
+  orbit.first_mum_re_=0;
+  orbit.first_mum_im_=0;
   params.period=1;
   position.worker->init(&params.base_re_s_, 0);
   position.worker->init(&params.base_im_s, 0);
   position.worker->init(&params.root_re_s, 0);
   position.worker->init(&params.root_im_s, 0);
   //threadCount=4;
-  threadCount=1;//so fast that sending messages is slower QThread::idealThreadCount()-1;
+  //threadCount=1;//so fast that sending messages is slower QThread::idealThreadCount()-1;
+  threadCount=QThread::idealThreadCount()-1;
   if (threadCount<1)
     threadCount=1;
   threads=new MandelEvaluator[threadCount];
   for (int t=0; t<threadCount; t++)
   {
     //threads[t].setHint(t);
-    QObject::connect(&threads[t], &MandelEvaluator::doneCompute,
+    QObject::connect(&threads[t], &MandelEvaluator::doneNewton,
                      this, &LaguerreModel::donePixel,
                      Qt::ConnectionType::QueuedConnection);
   }
+  QObject::connect(this, &LaguerreModel::doneWork,
+                   this, &LaguerreModel::giveWork1,
+                   Qt::ConnectionType::QueuedConnection);
 }
 
 LaguerreModel::~LaguerreModel()
@@ -93,12 +101,13 @@ QString LaguerreModel::pixelYtoIM_str(int y)
 QString LaguerreModel::getTimes()
 {
   QString result;
-  for (int t=0; t<threadCount; t++)
+  /*for (int t=0; t<threadCount; t++)
     result+=QString("%1-%2[%3,%4],").
         arg((threads[t].timeOuterTotal)/1000000000.0, 0, 'f', 3).
         arg((threads[t].timeInnerTotal)/1000000000.0, 0, 'f', 3).
         arg((threads[t].timeInvokePostTotal)/1000000000.0, 0, 'f', 3).
-        arg((threads[t].timeInvokeSwitchTotal)/1000000000.0, 0, 'f', 3);
+        arg((threads[t].timeInvokeSwitchTotal)/1000000000.0, 0, 'f', 3);*/
+  result="X-X";
   return result;
 }
 
@@ -142,7 +151,8 @@ QString LaguerreModel::getTextInfoGen()
   }
 
   return "Per="+QString::number(params.period)+" "+state+" iter="+QString::number(data->iter)+
-        " mu="+QString::number(orbit.first_mu_re, 'f', 3)+","+QString::number(orbit.first_mu_im, 'f', 3);
+        " mu="+QString::number(orbit.first_mu_re_, 'f', 3)+","+QString::number(orbit.first_mu_im, 'f', 3)+
+        " mum="+QString::number(orbit.first_mum_re_, 'f', 3)+","+QString::number(orbit.first_mum_im_, 'f', 3);
 }
 
 QString LaguerreModel::getTextInfoSpec()
@@ -453,7 +463,7 @@ void LaguerreModel::startNewEpoch()
 {
   epoch=(epoch+1)%2000000000;
   lastGivenPointIndex_=0;
-  //effortBonus=0;
+  effortBonus=0;
   for (int t=0; t<threadCount; t++)
     if (threads[t].currentParams.pixelIndex<0)
       giveWork(&threads[t]);
@@ -472,6 +482,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     return;
   if (params.period<=0)
     return;
+
   QImage newOverlay(imageWidth, imageHeight, QImage::Format::Format_ARGB32);
   QPainter painter(&newOverlay);
   //QRgb what=newOverlay.pixel(0, 0);
@@ -522,7 +533,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     };
 
     painter.setBrush(Qt::BrushStyle::NoBrush);
-    painter.setPen(QColor(0xff, 0, 0)); //paint root as /\    .
+    painter.setPen(QColor(0xff, 0, 0)); //paint root as +
     position.worker->assign(tmp, &params.root_re_s);
     position.worker->sub(tmp, &position.center_re_s);
     position.worker->lshift(tmp, position.step_log);
@@ -539,6 +550,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
       painter.drawLines(l2, 2);
     };
   }
+
 
   //evaluator.params.c .. saved mouse coordinates
   //evaluator.data.root .. found root (temporary)
@@ -557,12 +569,18 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   //orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
   orbit.pointData.iter=orbit.evaluator.newtres_.cyclesNeeded;
   orbit.pointData.firstM=orbit.evaluator.newtres_.firstM;
+  //guess and paint accyBound
+  /*double fz_re=orbit.worker->toDouble(&orbit.evaluator.newtres_.fz_r_re);
+  double fz_im=orbit.worker->toDouble(&orbit.evaluator.newtres_.fz_r_im);
+  double estimated_accuracy=sqrt(5*params.period*orbit.worker->eps2()/(fz_re*fz_re+fz_im*fz_im));*/
   orbit.worker->assign(&orbit.pointData.fz_r_re, &orbit.evaluator.newtres_.fz_r_re);
   orbit.worker->add_double(&orbit.pointData.fz_r_re, 1);
   orbit.worker->assign(&orbit.pointData.fz_r_im, &orbit.evaluator.newtres_.fz_r_im);
   orbit.pointData.naiveChoice=orbit.evaluator.newtres_.naiveChoice;
-  orbit.first_mu_re=orbit.evaluator.newtres_.firstMu_re;
+  orbit.first_mu_re_=orbit.evaluator.newtres_.firstMu_re_;
   orbit.first_mu_im=orbit.evaluator.newtres_.firstMu_im;
+  orbit.first_mum_re_=orbit.evaluator.newtres_.firstMum_re_;
+  orbit.first_mum_im_=orbit.evaluator.newtres_.firstMum_im_;
 
   int circ_x, circ_y;
   double tmp_re, tmp_im;
@@ -578,6 +596,14 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawLine(circ_x-2, circ_y+2, circ_x+2, circ_y-2);
+    //size of r that maps to 1 epsilon: about the width of transition from >0 to <0
+    int circ_r=ldexp(sqrt(orbit.evaluator.newtres_.accy_estimated_*orbit.worker->eps2()), position.step_log);
+    if ((circ_r>=1) && (circ_r<=10003))
+      painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
+    //size of r that maps to a few epsilon: the accuracy of root and also size of the dead pool
+    circ_r=ldexp(sqrt((orbit.evaluator.newtres_.accy_tostop_*orbit.evaluator.newtres_.accy_estimated_)*orbit.worker->eps2()), position.step_log);
+    if ((circ_r>=1) && (circ_r<=10003))
+      painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
   };
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
@@ -693,7 +719,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   painter.setBrush(Qt::BrushStyle::NoBrush);
   if (orbit.evaluator.newtres_.first_neumaier1_im_!=0)
   {
-    painter.setPen(QColor(0xff, 0x00, 0x00)); //Batra_im
+    painter.setPen(QColor(0xff, 0x00, 0x00)); //Neumaier1_im
     int circ_r=ldexp(abs(orbit.evaluator.newtres_.first_neumaier1_im_), position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
@@ -702,7 +728,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   };
   if ((orbit.evaluator.newtres_.first_neumaier1_im_!=0) || (orbit.evaluator.newtres_.first_neumaier1_re_<0))
   {
-    painter.setPen(QColor(0xff, 0x00, 0xff)); //Batra
+    painter.setPen(QColor(0xff, 0x00, 0xff)); //Neumaier1_mag
     double mag=sqrt(orbit.evaluator.newtres_.first_neumaier1_re_*orbit.evaluator.newtres_.first_neumaier1_re_+
                     orbit.evaluator.newtres_.first_neumaier1_im_*orbit.evaluator.newtres_.first_neumaier1_im_);
     int circ_r=ldexp(mag, position.step_log);
@@ -713,7 +739,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   }
   else
   {
-    painter.setPen(QColor(0xff, 0xff, 0xff)); //Batra
+    painter.setPen(QColor(0xff, 0xff, 0xff)); //Neumaier1
     int circ_r=ldexp(orbit.evaluator.newtres_.first_neumaier1_re_, position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
@@ -724,7 +750,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   painter.setBrush(Qt::BrushStyle::NoBrush);
   if (orbit.evaluator.newtres_.first_neumaier2_im!=0)
   {
-    painter.setPen(QColor(0xff, 0x00, 0x00)); //Batra_im
+    painter.setPen(QColor(0xff, 0x00, 0x00)); //Neumaier2_im
     int circ_r=ldexp(abs(orbit.evaluator.newtres_.first_neumaier2_im), position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
@@ -734,7 +760,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   };
   if ((orbit.evaluator.newtres_.first_neumaier2_im!=0) || (orbit.evaluator.newtres_.first_neumaier2_re<0))
   {
-    painter.setPen(QColor(0xff, 0x00, 0xff)); //Batra
+    painter.setPen(QColor(0xff, 0x00, 0xff)); //Neumaier2_mag
     double mag=sqrt(orbit.evaluator.newtres_.first_neumaier2_re*orbit.evaluator.newtres_.first_neumaier2_re+
                     orbit.evaluator.newtres_.first_neumaier2_im*orbit.evaluator.newtres_.first_neumaier2_im);
     int circ_r=ldexp(mag, position.step_log);
@@ -746,7 +772,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   }
   else
   {
-    painter.setPen(QColor(0xff, 0xff, 0xff)); //Batra
+    painter.setPen(QColor(0xff, 0xff, 0xff)); //Neumaier2
     int circ_r=ldexp(orbit.evaluator.newtres_.first_neumaier2_re, position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
@@ -791,51 +817,56 @@ void LaguerreModel::writeToImage(ShareableImageWrapper image)
               break;
             case LaguerrePoint::State::stResolved:
             {
-              int r;
+              if (data->iter==0)
+                image.image->setPixel(x, y, 0xff606060); //the dead pool
+              else
               {
-                double tr=position.worker->toDouble(&data->fz_r_re);
-                double ti=position.worker->toDouble(&data->fz_r_im);
-                if (tr*tr+ti*ti>1)
-                  r=0xc0;
+                int r;
+                {
+                  double tr=position.worker->toDouble(&data->fz_r_re);
+                  double ti=position.worker->toDouble(&data->fz_r_im);
+                  if (tr*tr+ti*ti>1)
+                    r=0xc0;
+                  else
+                    r=0x00;
+                }
+                int g;
+                /*if (data->firstM>=3)
+                  g=0xff;
+                else if (data->firstM>=2)
+                  g=0xbf+0x40*(data->firstM-2);
+                else if (data->firstM>=1)
+                  g=0x7f+0x40*(data->firstM-1);
+                else if (data->firstM>=0)
+                  g=0x3f+0x40*(data->firstM-0);
+                else if (data->firstM>=-1)
+                  g=0x00+0x40*(data->firstM+1);
                 else
-                  r=0x00;
+                  g=0xdf;*/
+                if (data->firstM>=3)
+                  g=0x7f;
+                else if (data->firstM>=2)
+                  g=0xbf-0x40*(data->firstM-2);
+                else if (data->firstM>=1)
+                  g=0xff-0x40*(data->firstM-1);
+                else if (data->firstM>=0)
+                  g=0x00+0x40*(data->firstM-0);
+                else if (data->firstM>=-1)
+                  g=0x40+0x40*(data->firstM+1);
+                else
+                  g=0x80;
+                int b;
+                switch (data->iter % 5)
+                {
+                  case  0: b=0x00; break;
+                  case  1: b=0xff; break;
+                  case  2: b=0xc0; break;
+                  case  3: b=0x80; break;
+                  case  4: b=0x40; break;
+                  default: b=0xff;
+                }
+                image.image->setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+(b));
               }
-              int g;
-              /*if (data->firstM>=3)
-                g=0xff;
-              else if (data->firstM>=2)
-                g=0xbf+0x40*(data->firstM-2);
-              else if (data->firstM>=1)
-                g=0x7f+0x40*(data->firstM-1);
-              else if (data->firstM>=0)
-                g=0x3f+0x40*(data->firstM-0);
-              else if (data->firstM>=-1)
-                g=0x00+0x40*(data->firstM+1);
-              else
-                g=0xdf;*/
-              if (data->firstM>=3)
-                g=0x7f;
-              else if (data->firstM>=2)
-                g=0xbf-0x40*(data->firstM-2);
-              else if (data->firstM>=1)
-                g=0xff-0x40*(data->firstM-1);
-              else if (data->firstM>=0)
-                g=0x00+0x40*(data->firstM-0);
-              else if (data->firstM>=-1)
-                g=0x40+0x40*(data->firstM+1);
-              else
-                g=0x80;
-              int b;
-              switch (data->iter % 5)
-              {
-                case  0: b=0x00; break;
-                case  1: b=0xff; break;
-                case  2: b=0xc0; break;
-                case  3: b=0x80; break;
-                case  4: b=0x40; break;
-                default: b=0xff;
-              }
-              image.image->setPixel(x, y, 0xff000000+(r<<16)+(g<<8)+(b));
               knownenum=true;
             } break;
             case LaguerrePoint::State::stFail:
@@ -854,72 +885,112 @@ void LaguerreModel::writeToImage(ShareableImageWrapper image)
 
 void LaguerreModel::giveWork(MandelEvaluator *evaluator)
 {
-  int quickrun=0;
-  MandelMath::complex tmpc(position.worker, &params.base_re_s_, &params.base_im_s, true);
-  MandelMath::complex root(position.worker, &evaluator->currentData.f_re, &evaluator->currentData.f_im, true);
-  for (int pi=0; pi<imageWidth*imageHeight; pi++)
+  int retryEffortFrom=0;
+  while (retryEffortFrom>=0)
   {
-    int pointIndex=(lastGivenPointIndex_+pi)%(imageWidth*imageHeight);
-    //if ((lastGivenPointIndex_!=0) && (pointIndex==0))
-      //dbgPoint();
-    LaguerrePoint *pointData=&pointStore[pointIndex];
-    if (pointData->state==LaguerrePoint::State::stUnknown)
+    retryEffortFrom=-1;
+    int quickrun=0;
+    MandelMath::complex tmpc(position.worker, &params.base_re_s_, &params.base_im_s, true);
+    MandelMath::complex root(position.worker, &evaluator->currentData.f_re, &evaluator->currentData.f_im, true);
+    for (int pi=0; pi<imageWidth*imageHeight; pi++)
     {
-      bool found=false;
-      for (int t=0; t<threadCount; t++)
-        if (threads[t].currentParams.pixelIndex==pointIndex)
-        {
-          found=true;
-          break;
-        };
-      if (evaluator->currentParams.pixelIndex!=-1)
-        dbgPoint();
-      assert(evaluator->currentParams.pixelIndex==-1);
-      if (!found)
+      int pointIndex=(lastGivenPointIndex_+pi)%(imageWidth*imageHeight);
+      //if ((lastGivenPointIndex_!=0) && (pointIndex==0))
+        //dbgPoint();
+      LaguerrePoint *pointData=&pointStore[pointIndex];
+      if (pointData->state==LaguerrePoint::State::stUnknown)
       {
-        evaluator->switchType(position.worker);
-        position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, root.re_s);
-        position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, root.im_s);
-        evaluator->currentParams.epoch=epoch;
-        evaluator->currentParams.pixelIndex=pointIndex;
-        if (evaluator->newton(params.period, &tmpc, &root, true, 12)>0)
+        bool found=false;
+        for (int t=0; t<threadCount; t++)
+          if (threads[t].currentParams.pixelIndex==pointIndex)
+          {
+            found=true;
+            break;
+          };
+        if (evaluator->currentParams.pixelIndex!=-1)
+          dbgPoint();
+        assert(evaluator->currentParams.pixelIndex==-1);
+        if (!found)
         {
-          pointData->state=LaguerrePoint::State::stResolved;
+          int phasex=(pointIndex%imageWidth-imageWidth/2+position.cached_center_re_mod+32768)%32768;
+          int phasey=(pointIndex/imageWidth-imageHeight/2+position.cached_center_im_mod+32768)%32768;
+          //int effort=ctz16(phasex)+ctz16(phasey);
+          int effort=MandelMath::ctz16(phasex | phasey);
+          if (effort>8)
+            effort=8;
+          if (effort+effortBonus<8)
+          {
+            if (retryEffortFrom<0)
+              retryEffortFrom=pointIndex;
+          }
+          else
+          {
+            evaluator->switchType(position.worker);
+            position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, root.re_s);
+            position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, root.im_s);
+            evaluator->currentParams.epoch=epoch;
+            evaluator->currentParams.pixelIndex=pointIndex;
+            if (params.period>10)
+            {
+              evaluator->startNewton(params.period, &tmpc);
+              evaluator->timeOuter.start();
+              lastGivenPointIndex_=pointIndex;
+              return;
+            }
+            else
+            {
+              int result=evaluator->newton(params.period, &tmpc, &root, true, 12);
+              donePixel1(evaluator, result);
+              quickrun++;
+              if (quickrun>=100)
+              {
+                lastGivenPointIndex_=pointIndex;
+                /*
+                can't figure out how to invokeMethod with arguments
+                QMetaObject::invokeMethod(this,
+                                          &LaguerreModel::giveWorkAll,
+                                          Qt::ConnectionType::QueuedConnection);*/
+                emit doneWork(evaluator);
+                return;
+              };
+            }
+          }
         }
-        else
-        {
-          evaluator->newtres_.cyclesNeeded=-1;
-          pointData->state=LaguerrePoint::State::stFail;
-        };
-        donePixel1(evaluator);
-        quickrun++;
-        if (quickrun>=1000)
-        {
-          lastGivenPointIndex_=pointIndex;
-          QMetaObject::invokeMethod(this,
-                                    &LaguerreModel::giveWorkAll,
-                                    Qt::ConnectionType::QueuedConnection);
-          return;
-        };
       }
+      //MandelEvaluator::simple(cr, ci, pointStore[y*imageWidth+x]);
     }
-    //MandelEvaluator::simple(cr, ci, pointStore[y*imageWidth+x]);
+    if ((retryEffortFrom>=0))// && (effortBonus<MAX_EFFORT))
+    {
+      effortBonus++;
+      lastGivenPointIndex_=retryEffortFrom;
+    }
+    else
+      retryEffortFrom=-1;
   }
 }
 
-void LaguerreModel::donePixel1(MandelEvaluator *me)
+void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
 {
   if ((me->currentParams.epoch==epoch) && (me->currentParams.pixelIndex>=0) && (me->currentParams.pixelIndex<imageWidth*imageHeight))
   {
     LaguerrePoint *point=&pointStore[me->currentParams.pixelIndex];
-    /*if (point->state!=LaguerrePoint::State::stUnknown)
+    if (point->state!=LaguerrePoint::State::stUnknown)
       qDebug()<<"Finished pixel finished again";
-    else*/
+    else
     {
       if (position.worker==nullptr)
         dbgPoint();
       else
       {
+        if (result>0)
+        {
+          point->state=LaguerrePoint::State::stResolved;
+        }
+        else
+        {
+          me->newtres_.cyclesNeeded=-1;
+          point->state=LaguerrePoint::State::stFail;
+        };
         //point->assign(position.worker, me->currentData);
         position.worker->assign(&point->f_re, &me->currentData.f_re); //root
         position.worker->assign(&point->f_im, &me->currentData.f_im);
@@ -938,10 +1009,10 @@ void LaguerreModel::donePixel1(MandelEvaluator *me)
   me->currentParams.pixelIndex=-1;
 }
 
-void LaguerreModel::donePixel(MandelEvaluator *me)
+void LaguerreModel::donePixel(MandelEvaluator *me, int result)
 {
   me->timeOuterTotal+=me->timeOuter.nsecsElapsed();
-  donePixel1(me);
+  donePixel1(me, result);
   giveWork(me);
 }
 

@@ -34,7 +34,7 @@ struct MandelPoint
   MandelMath::number_store f_re, f_im;
   MandelMath::number_store fc_c_re, fc_c_im; //fc_c, or fz_r if stPeriod2 or stPeriod3
   MandelMath::number_store fz_c_mag;
-  int lookper_startiter, lookper_prevGuess;
+  int lookper_startiter, lookper_prevGuess_, lookper_lastGuess;
   MandelMath::number_store lookper_startf_re, lookper_startf_im;
   MandelMath::number_store lookper_nearr_dist;
   MandelMath::number_store lookper_totalFzmag;
@@ -101,12 +101,14 @@ public:
     MandelMath::number_store c_re, c_im;
     int epoch;
     int pixelIndex;
-    int maxiter;
+    int maxiter_;
+    bool breakOnNewNearest;
     ComputeParams();
   } currentParams;
   MandelPoint currentData;
 
   bool startCompute(const MandelPoint *data, int quick_route); //qr: -1..never 0..auto 1..always
+  void startNewton(int period, const MandelMath::complex *c /*, currentData.f const *root, */);
   int newton(int period, const MandelMath::complex *c, MandelMath::complex *r, const bool fastHoming, const int suggestedMultiplicity);
   struct NewtRes
   {
@@ -122,7 +124,8 @@ public:
     double first_neumaier2_re, first_neumaier2_im;   //circle enclosing 2 but not 3 roots (approx) (never valid without  f''')
     //double first_lagum_re, first_lagum_im;
     double first_lagu1_re, first_lagu1_im, first_lagu1o_re, first_lagu1o_im;
-    double firstMu_re, firstMu_im;
+    double firstMu_re_, firstMu_im, firstMum_re_, firstMum_im_;
+    double accy_tostop_, accy_estimated_; //in units of eps2()
   } newtres_;
 protected:
   typedef MandelMath::complex complex;
@@ -134,7 +137,7 @@ protected:
     MandelMath::number_store lookper_nearr_re, lookper_nearr_im;//, lookper_nearr_dist;
     //MandelMath::number_store lookper_dist2;
     //int lookper_startiter, lookper_prevGuess;
-    int lookper_lastGuess;
+    //int lookper_lastGuess;
     //MandelMath::number_store lookper_totalFzmag;
   } eval;
   struct
@@ -168,8 +171,10 @@ protected:
   void evaluate();
 protected slots:
   void doCompute();
+  void doNewton();
 signals:
   void doneCompute(MandelEvaluator *me);
+  void doneNewton(MandelEvaluator *me, int result);
 };
 
 #endif // MANDELEVALUATOR_HPP

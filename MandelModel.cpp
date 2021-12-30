@@ -6,175 +6,6 @@
 #include "MandelModel.hpp"
 #include "MandelEvaluator.hpp"
 
-int ctz16(int x)
-{
-  int ctzidx=(((0xF65*(x&-x))&0x7800)>>10);
-  int ctz1=((0x59EC6C8C >> ctzidx)&0x0C) | ((0xC486BD63 >> ctzidx)&0x03);
-  return ctz1;
-  /* shift, append i, rotate to be max; is i followed by 0 only? -> negate else not negate
-  ctz 8 bit
-  00011101
-  000-00i-i00-y   1
-   001-01i-1i0-y   1
-    011-11i-11i-y   1
-     111-11i-11i-y   0
-      110-10i-i10-n   1
-       101-01i-1i0-y   0
-        010-10i-i10-n   0
-         100-00i-i00-y   0
-          000
-   0x1D * 0=0x0000 >>4&7=0
-   0x1D * 1=0x001D >>4&7=1
-   0x1D * 2=0x003A >>4&7=3   MAGIC[3]:=ctz(2)
-   0x1D * 4=0x0074 >>4&7=7   MAGIC[7]:=ctz(4)
-   0x1D * 8=0x00E8 >>4&7=6
-   0x1D *16=0x01D0 >>4&7=5
-   0x1D *32=0x03A0 >>4&7=2
-   0x1D *64=0x0740 >>4&7=4
-   0x1D*128=0x0E80 >>4&7=0   MAGIC[0]=ctz(128)
-   0x1D*256=0x1D00 >>4&7=0
-   (0x23461507 >> (((0x1D*(i&-i))&0x70)>>2))&0x07 ?= ctz(0..255)
-
-   ctz 16 bit
-   0000-000i-i000-y 1
-    0001-001i-1i00-y 1
-     0011-011i-11i0-y 1
-      0111-111i-111i-y 1
-       1111-111i-111i-y 0
-        1110-110i-i110-n 1
-         1101-101i-1i10-n 1
-          1011-011i-11i0-y 0
-           0110-110i-i110-n 0
-            1100-100i-i100-n 1
-             1001-001i-1i00-y 0
-              0010-010i-10i0 or i010-y or n-1 or 0  (10i0 correct)
-               0101-101i-1i10-n 0
-                1010-010i-10i0 or i010-y or n-0 or 1 (10i0 correct)
-                 0100-100i-i100-n 0
-                  1000-000i-i000-y 0
-                   0000
-   0000111101100101 = 0xF65
-   (0x... >> (((0xF65*(i&-i))&0x7800)>>10))&0x0F ?= ctz(0..255)
-         FEDCBA9876543210
-   MAGIC=34586C9E27BD1A0F
-   MAGIC23=0x59EC6C8C; //00 0101 1001 1110 1100 0110 1100 1000 1100
-   MAGIC01=0xC486BD63; // 1100 0100 1000 0110 1011 1101 0110 0011
-    int ctzidx=(((0xF65*(i&-i))&0x7800)>>10);
-    int ctz1=((0x59EC6C8C >> ctzidx)&0x0C) | ((0xC486BD63 >> ctzidx)&0x03);
-
-   ctz 32 bit
-   00000-0000i-i0000-y 1
-    00001-0001i-1i000-y 1                                        0
-     00011-0011i-11i00-y 1                                       1
-      00111-0111i-111i0-y 1                                      2
-       01111-1111i-1111i-y 1                                     3
-        11111-1111i-1111i-y 0                                    4
-         11110-1110i-i1110-n 1                                   5
-          11101-1101i-1i110-n 1                                  6
-           11011-1011i-11i10-n 1                                 7
-            10111-0111i-111i0-y 0                                8
-             01110-1110i-i1110-n 0                               9
-              11100-1100i-i1100-n 1                              a
-               11001-1001i-1i100-n 1                             b
-                10011-0011i-11i00-y 0                            c
-                 00110-0110i-110i0-y 1
-                  01101-1101i-1i110-n 0
-                   11010-1010i-i1010-n 1
-                    10101-0101i-1i010-n 1
-                     01011-1011i-11i10-n 0
-                      10110-0110i-110i0-y 0
-                       01100-1100i-i1100-n 0
-                        11000-1000i-i1000-n 1
-                         10001-0001i-1i000-y 0
-                          00010-0010i-10i00-y 1
-                           00101-0101i-1i010-n 0
-                            01010-1010i-i1010-n 0
-                             10100-0100i-i0100-n 1
-                              01001-1001i-1i100-n 0
-                               10010-0010i-10i00-y 0
-                                00100-0100i-i0100-n 0
-                                 01000-1000i-i1000-n 0
-                                  10000-0000i-i0000-y 0
-                                   00000
-   00000111110111001101011000101001 = 0000 0111 1101 1100 1101 0110 0010 1001 = 0x7DCD629
-         1f 1e 1d 1c 1b 1a 19 18 17 16 15 14 13 12 11 10 0f 0e 0d 0c 0b 0a 09 08 07 06 05 04 03 02 01 00
-   MAGIC= 4  5  6  a  7  f  b 14  8 12 10 19  c 1b 15 1e  3  9  e 13 11 18 1a 1d  2  d 17 1c  1 16  0 1f
-   MAGIC4=00000001011101110001111100110101 = 0000 0001 0111 0111 0001 1111 0011 0101 0000 = 0x1771f350
-   MAGIC3=00010110100111010110011101010001 = 000 1011 0100 1110 1011 0011 1010 1000 1000 =  0xb4eb3a88
-   MAGIC2=11101101000010110010000101110101 = .. 1110 1101 0000 1011 0010 0001 0111 0101 = 0xed0b2175; 0x3b42c85d4 won't fit
-   MAGIC1=00111110010001011011001010100101 = 0 0111 1100 1000 1011 0110 0101 0100 1010 = 0x7c8b654a
-   MAGIC0=01001110000101101101100101101001 = 0100 1010 0001 0110 1101 1001 0110 1001 = 0x4e16d969
-
-    int ctzidx=(((0x7DCD629*(i&-i))&0x7C000000)>>26);
-    int ctz1=((0x1771f350 >> ctzidx)&0x10) |
-             ((0xb4eb3a88 >> ctzidx)&0x08) |
-             ((0xed0b2175 >> ctzidx)&1)<<2 |
-             ((0x7c8b654a >> ctzidx)&0x02) |
-             ((0x4e16d969 >> ctzidx)&0x01);
-   */
-
-  /*for (int i=0; i<256; i++) //0 returns 7
-  {
-    int ctz1=(0x23461507 >> (((0x1D*(i&-i))&0x70)>>2))&0x07;
-    int ctz2=0;
-    if (i&1) ctz2=0;
-    else if (i&0x03) ctz2=1;
-    else if (i&0x07) ctz2=2;
-    else if (i&0x0F) ctz2=3;
-    else if (i&0x1F) ctz2=4;
-    else if (i&0x3F) ctz2=5;
-    else if (i&0x7F) ctz2=6;
-    else if (i&0xFF) ctz2=7;
-    else ctz2=7;
-    if (ctz2!=ctz1)
-      dbgPoint();
-  }
-
-  for (int i=0; i<65536; i++) //0 returns 15
-  {
-    int ctzidx=(((0xF65*(i&-i))&0x7800)>>10);
-    int ctz1=((0x59EC6C8C >> ctzidx)&0x0C) | ((0xC486BD63 >> ctzidx)&0x03);
-    int ctz2=0;
-    if (i&1) ctz2=0;
-    else if (i&0x03) ctz2=1;
-    else if (i&0x07) ctz2=2;
-    else if (i&0x0F) ctz2=3;
-    else if (i&0x1F) ctz2=4;
-    else if (i&0x3F) ctz2=5;
-    else if (i&0x7F) ctz2=6;
-    else if (i&0xFF) ctz2=7;
-    else if (i&0x1FF) ctz2=8;
-    else if (i&0x3FF) ctz2=9;
-    else if (i&0x7FF) ctz2=10;
-    else if (i&0xFFF) ctz2=11;
-    else if (i&0x1FFF) ctz2=12;
-    else if (i&0x3FFF) ctz2=13;
-    else if (i&0x7FFF) ctz2=14;
-    else if (i&0xFFFF) ctz2=15;
-    else ctz2=15;
-    if (ctz2!=ctz1)
-      dbgPoint();
-  }
-
-  for (int ii=0; ii<32; ii++)
-  {
-    unsigned int i=(1u<<ii);
-    int ctzidx=(((0x7DCD629*(i&-i))&0x7C000000)>>26);
-    int ctz1=((0x1771f350 >> ctzidx)&0x10) |
-             ((0xb4eb3a88 >> ctzidx)&0x08) |
-             ((0xed0b2175 >> ctzidx)&1)<<2 |
-             ((0x7c8b654a >> ctzidx)&0x02) |
-             ((0x4e16d969 >> ctzidx)&0x01);
-    if (ii==32)
-    {
-      if (ctz1!=31)
-        dbgPoint();
-    }
-    else if (ctz1!=ii)
-      dbgPoint();
-  }*/
-}
-
 MandelModel::MandelModel(): QObject(), position()
 {
   unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
@@ -185,7 +16,7 @@ MandelModel::MandelModel(): QObject(), position()
   imageHeight=0;
   pointStore=nullptr;
   lastGivenPointIndex_=0;
-  effortBonus=0;
+  effortBonus_=0;
   orbit.worker=nullptr;
   //threadCount=4;
   threadCount=QThread::idealThreadCount()-1;
@@ -374,7 +205,9 @@ ShareableViewInfo MandelModel::getViewInfo()
 {
   ShareableViewInfo result;
   result.worker=orbit.worker;
-  result.period=orbit.pointData.period;
+  result.period=orbit.pointData.near0iter;//evaluator.currentData.lookper_lastGuess;//orbit.pointData.period;
+  if (result.period<1)
+    result.period=1;
   result.scale=position.step_size__;
   orbit.worker->init(&result.re_);
   orbit.worker->init(&result.im);
@@ -610,7 +443,7 @@ void MandelModel::startNewEpoch()
 {
   epoch=(epoch+1)%2000000000;
   lastGivenPointIndex_=0;
-  effortBonus=0;
+  effortBonus_=0;
   for (int t=0; t<threadCount; t++)
     if (threads[t].currentParams.pixelIndex<0)
       giveWork(&threads[t]);
@@ -629,7 +462,9 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     painter.fillRect(0, 0, imageWidth, imageHeight, Qt::GlobalColor::transparent);
   };
 
-/*  {
+/* testing how drawLine rounds in Qt
+   result: extremely ugly and no way to fix it
+  {
     painter.setPen(QColor(0xff, 0xff, 0xff));
     painter.fillRect(0, 0, 20+6*10, 20, Qt::GlobalColor::black);
     for (int i=0; i<6; i++)
@@ -660,16 +495,6 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
       }
     }
   }*/
-
-  /*/fillRect(transparent) does nothing, does not clear the image
-  painter.setPen(QColor("cyan"));
-  painter.setBrush(QBrush(QColor("yellow")));
-  painter.drawEllipse(150, 50, 100, 50);
-  painter.fillRect(0, 0, imageWidth, imageHeight, Qt::GlobalColor::transparent);
-  painter.drawEllipse(150, 150, 100, 50);
-  //painter.setBackground(QBrush(Qt::BrushStyle::NoBrush));
-  painter.setBackgroundMode(Qt::BGMode::TransparentMode);
-  painter.eraseRect(200, 75, 20, 100);*/
 
   MandelPoint *data=&pointStore[y*imageWidth+x];
   if (orbit.worker!=position.worker)
@@ -725,13 +550,68 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   orbit.evaluator.currentParams.epoch=epoch;
   orbit.evaluator.currentParams.pixelIndex=0;
   orbit.pointData.zero(position.worker, &orbit.evaluator.currentParams.c_re, &orbit.evaluator.currentParams.c_im);
-  for (int effort=0; effort<=MAX_EFFORT; effort++)
+  /*for (int effort=0; effort<=MAX_EFFORT; effort++)
   {
     orbit.evaluator.currentParams.maxiter=1<<effort;
     orbit.evaluator.startCompute(&orbit.pointData, +1);
     orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
     if (orbit.pointData.state!=MandelPoint::State::stUnknown)
       break;
+  }*/
+  orbit.evaluator.currentParams.breakOnNewNearest=true;
+  orbit.evaluator.currentParams.maxiter_=1<<MAX_EFFORT;
+  painter.setBrush(Qt::BrushStyle::NoBrush);
+  painter.setPen(QColor(0xff, 0xff, 0xff)); //paint path
+  while ((orbit.pointData.state==MandelPoint::State::stUnknown) &&
+         (orbit.pointData.iter<(1<<MAX_EFFORT)))
+  {
+    int line_sx, line_sy, line_ex, line_ey;
+    position.worker->assign(&orbit.tmp, &orbit.pointData.f_re);
+    position.worker->sub(&orbit.tmp, &position.center_re_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    line_sx=position.worker->toDouble(&orbit.tmp)+imageWidth/2;
+    position.worker->assign(&orbit.tmp, &orbit.pointData.f_im);
+    position.worker->sub(&orbit.tmp, &position.center_im_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    line_sy=imageHeight/2-position.worker->toDouble(&orbit.tmp);
+
+    if (orbit.evaluator.currentData.lookper_lastGuess==0)
+      orbit.evaluator.currentParams.maxiter_=1<<MAX_EFFORT;
+    else
+      orbit.evaluator.currentParams.maxiter_=(orbit.pointData.iter/orbit.evaluator.currentData.lookper_lastGuess+1)*orbit.evaluator.currentData.lookper_lastGuess;
+    orbit.evaluator.startCompute(&orbit.pointData, +1);
+    orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
+
+    position.worker->assign(&orbit.tmp, &orbit.pointData.f_re);
+    position.worker->sub(&orbit.tmp, &position.center_re_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    line_ex=position.worker->toDouble(&orbit.tmp)+imageWidth/2;
+    position.worker->assign(&orbit.tmp, &orbit.pointData.f_im);
+    position.worker->sub(&orbit.tmp, &position.center_im_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    line_ey=imageHeight/2-position.worker->toDouble(&orbit.tmp);
+    painter.drawLine(line_sx, line_sy, line_ex, line_ey);
+  }
+  if ((orbit.pointData.state==MandelPoint::State::stPeriod2) ||
+      (orbit.pointData.state==MandelPoint::State::stPeriod3))
+  {
+    int circ_x, circ_y;
+    painter.setPen(QColor(0, 0xff, 0xff)); //paint root
+    position.worker->assign(&orbit.tmp, &orbit.pointData.root_re);
+    position.worker->sub(&orbit.tmp, &position.center_re_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    circ_x=position.worker->toDouble(&orbit.tmp)+imageWidth/2;
+    position.worker->assign(&orbit.tmp, &orbit.pointData.root_im);
+    position.worker->sub(&orbit.tmp, &position.center_im_s);
+    position.worker->lshift(&orbit.tmp, position.step_log);
+    circ_y=imageHeight/2-position.worker->toDouble(&orbit.tmp);
+    if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
+    {
+      painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
+      QLine l2[2]={{circ_x-2, circ_y, circ_x+2, circ_y},
+                   {circ_x, circ_y-2, circ_x, circ_y+2}};
+      painter.drawLines(l2, 2);
+    };
   }
 
   if (!orbit.worker->is0(&orbit.lagu_c_re_) ||
@@ -1267,14 +1147,14 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
             int phasex=(pointIndex%imageWidth-imageWidth/2+position.cached_center_re_mod+32768)%32768;
             int phasey=(pointIndex/imageWidth-imageHeight/2+position.cached_center_im_mod+32768)%32768;
             //int effort=ctz16(phasex)+ctz16(phasey);
-            int effort=ctz16(phasex | phasey);
+            int effort=MandelMath::ctz16(phasex | phasey);
             if (effort>8)
               effort=8;
-            effort+=effortBonus;
+            effort+=effortBonus_;
             if (effort>=MAX_EFFORT)
               effort=MAX_EFFORT;
-            evaluator->currentParams.maxiter=1<<effort;
-            if (pointData->iter>=evaluator->currentParams.maxiter)
+            evaluator->currentParams.maxiter_=1<<effort;
+            if (pointData->iter>=evaluator->currentParams.maxiter_)
             {
               if (effort>=MAX_EFFORT)
                 pointData->state=MandelPoint::State::stMaxIter;
@@ -1288,7 +1168,7 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
               position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, &evaluator->currentParams.c_im);
               evaluator->currentParams.epoch=epoch;
               evaluator->currentParams.pixelIndex=pointIndex;
-              if (evaluator->startCompute(pointData, quickrun>=1000?-1:0))
+              if (evaluator->startCompute(pointData, quickrun>=100?-1:0))
               //if (worker->startCompute(pointData, true))
               {
                 evaluator->timeOuter.start();
@@ -1305,9 +1185,9 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
         }
         //MandelEvaluator::simple(cr, ci, pointStore[y*imageWidth+x]);
       }
-    if ((retryEffortFrom>=0) && (effortBonus<MAX_EFFORT))
+    if ((retryEffortFrom>=0) && (effortBonus_<MAX_EFFORT))
     {
-      effortBonus++;
+      effortBonus_++;
       lastGivenPointIndex_=retryEffortFrom;
     }
     else

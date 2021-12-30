@@ -21,6 +21,214 @@ void dbgPoint()
 
 namespace MandelMath {
 
+int gcd(int m, int n)
+{
+  if (m==n)
+    return m;
+  if (m==0)
+    return n;
+  if (n==0)
+    return m;
+  int c=0;
+  while (((m|n)&1)==0)
+  {
+    m>>=1; n>>=1; c++;
+  }
+
+  /* Dividing n by 2 until a becomes odd */
+  while ((n & 1) == 0)
+    n >>= 1;
+
+  /* From here on, 'n' is always odd. */
+  do
+  {
+    /* If m is even, remove all factor of 2 in m */
+    while ((m & 1) == 0)
+      m >>= 1;
+
+    /* Now m and n are both odd.
+       Swap if necessary so n <= m,
+       then set m = m - n (which is even).*/
+    if (n > m)
+    { int x=n; n=m; m=x; }
+
+    m = (m - n)>>1;
+  } while (m != 0);
+
+  /* restore common factors of 2 */
+  return n << c;
+}
+
+int ctz16(int x)
+{
+  int ctzidx=(((0xF65*(x&-x))&0x7800)>>10);
+  int ctz1=((0x59EC6C8C >> ctzidx)&0x0C) | ((0xC486BD63 >> ctzidx)&0x03);
+  return ctz1;
+  /* shift, append i, rotate to be max; is i followed by 0 only? -> negate else not negate
+  ctz 8 bit
+  00011101
+  000-00i-i00-y   1
+   001-01i-1i0-y   1
+    011-11i-11i-y   1
+     111-11i-11i-y   0
+      110-10i-i10-n   1
+       101-01i-1i0-y   0
+        010-10i-i10-n   0
+         100-00i-i00-y   0
+          000
+   0x1D * 0=0x0000 >>4&7=0
+   0x1D * 1=0x001D >>4&7=1
+   0x1D * 2=0x003A >>4&7=3   MAGIC[3]:=ctz(2)
+   0x1D * 4=0x0074 >>4&7=7   MAGIC[7]:=ctz(4)
+   0x1D * 8=0x00E8 >>4&7=6
+   0x1D *16=0x01D0 >>4&7=5
+   0x1D *32=0x03A0 >>4&7=2
+   0x1D *64=0x0740 >>4&7=4
+   0x1D*128=0x0E80 >>4&7=0   MAGIC[0]=ctz(128)
+   0x1D*256=0x1D00 >>4&7=0
+   (0x23461507 >> (((0x1D*(i&-i))&0x70)>>2))&0x07 ?= ctz(0..255)
+
+   ctz 16 bit
+   0000-000i-i000-y 1
+    0001-001i-1i00-y 1
+     0011-011i-11i0-y 1
+      0111-111i-111i-y 1
+       1111-111i-111i-y 0
+        1110-110i-i110-n 1
+         1101-101i-1i10-n 1
+          1011-011i-11i0-y 0
+           0110-110i-i110-n 0
+            1100-100i-i100-n 1
+             1001-001i-1i00-y 0
+              0010-010i-10i0 or i010-y or n-1 or 0  (10i0 correct)
+               0101-101i-1i10-n 0
+                1010-010i-10i0 or i010-y or n-0 or 1 (10i0 correct)
+                 0100-100i-i100-n 0
+                  1000-000i-i000-y 0
+                   0000
+   0000111101100101 = 0xF65
+   (0x... >> (((0xF65*(i&-i))&0x7800)>>10))&0x0F ?= ctz(0..255)
+         FEDCBA9876543210
+   MAGIC=34586C9E27BD1A0F
+   MAGIC23=0x59EC6C8C; //00 0101 1001 1110 1100 0110 1100 1000 1100
+   MAGIC01=0xC486BD63; // 1100 0100 1000 0110 1011 1101 0110 0011
+    int ctzidx=(((0xF65*(i&-i))&0x7800)>>10);
+    int ctz1=((0x59EC6C8C >> ctzidx)&0x0C) | ((0xC486BD63 >> ctzidx)&0x03);
+
+   ctz 32 bit
+   00000-0000i-i0000-y 1
+    00001-0001i-1i000-y 1                                        0
+     00011-0011i-11i00-y 1                                       1
+      00111-0111i-111i0-y 1                                      2
+       01111-1111i-1111i-y 1                                     3
+        11111-1111i-1111i-y 0                                    4
+         11110-1110i-i1110-n 1                                   5
+          11101-1101i-1i110-n 1                                  6
+           11011-1011i-11i10-n 1                                 7
+            10111-0111i-111i0-y 0                                8
+             01110-1110i-i1110-n 0                               9
+              11100-1100i-i1100-n 1                              a
+               11001-1001i-1i100-n 1                             b
+                10011-0011i-11i00-y 0                            c
+                 00110-0110i-110i0-y 1
+                  01101-1101i-1i110-n 0
+                   11010-1010i-i1010-n 1
+                    10101-0101i-1i010-n 1
+                     01011-1011i-11i10-n 0
+                      10110-0110i-110i0-y 0
+                       01100-1100i-i1100-n 0
+                        11000-1000i-i1000-n 1
+                         10001-0001i-1i000-y 0
+                          00010-0010i-10i00-y 1
+                           00101-0101i-1i010-n 0
+                            01010-1010i-i1010-n 0
+                             10100-0100i-i0100-n 1
+                              01001-1001i-1i100-n 0
+                               10010-0010i-10i00-y 0
+                                00100-0100i-i0100-n 0
+                                 01000-1000i-i1000-n 0
+                                  10000-0000i-i0000-y 0
+                                   00000
+   00000111110111001101011000101001 = 0000 0111 1101 1100 1101 0110 0010 1001 = 0x7DCD629
+         1f 1e 1d 1c 1b 1a 19 18 17 16 15 14 13 12 11 10 0f 0e 0d 0c 0b 0a 09 08 07 06 05 04 03 02 01 00
+   MAGIC= 4  5  6  a  7  f  b 14  8 12 10 19  c 1b 15 1e  3  9  e 13 11 18 1a 1d  2  d 17 1c  1 16  0 1f
+   MAGIC4=00000001011101110001111100110101 = 0000 0001 0111 0111 0001 1111 0011 0101 0000 = 0x1771f350
+   MAGIC3=00010110100111010110011101010001 = 000 1011 0100 1110 1011 0011 1010 1000 1000 =  0xb4eb3a88
+   MAGIC2=11101101000010110010000101110101 = .. 1110 1101 0000 1011 0010 0001 0111 0101 = 0xed0b2175; 0x3b42c85d4 won't fit
+   MAGIC1=00111110010001011011001010100101 = 0 0111 1100 1000 1011 0110 0101 0100 1010 = 0x7c8b654a
+   MAGIC0=01001110000101101101100101101001 = 0100 1010 0001 0110 1101 1001 0110 1001 = 0x4e16d969
+
+    int ctzidx=(((0x7DCD629*(i&-i))&0x7C000000)>>26);
+    int ctz1=((0x1771f350 >> ctzidx)&0x10) |
+             ((0xb4eb3a88 >> ctzidx)&0x08) |
+             ((0xed0b2175 >> ctzidx)&1)<<2 |
+             ((0x7c8b654a >> ctzidx)&0x02) |
+             ((0x4e16d969 >> ctzidx)&0x01);
+   */
+
+  /*for (int i=0; i<256; i++) //0 returns 7
+  {
+    int ctz1=(0x23461507 >> (((0x1D*(i&-i))&0x70)>>2))&0x07;
+    int ctz2=0;
+    if (i&1) ctz2=0;
+    else if (i&0x03) ctz2=1;
+    else if (i&0x07) ctz2=2;
+    else if (i&0x0F) ctz2=3;
+    else if (i&0x1F) ctz2=4;
+    else if (i&0x3F) ctz2=5;
+    else if (i&0x7F) ctz2=6;
+    else if (i&0xFF) ctz2=7;
+    else ctz2=7;
+    if (ctz2!=ctz1)
+      dbgPoint();
+  }
+
+  for (int i=0; i<65536; i++) //0 returns 15
+  {
+    int ctzidx=(((0xF65*(i&-i))&0x7800)>>10);
+    int ctz1=((0x59EC6C8C >> ctzidx)&0x0C) | ((0xC486BD63 >> ctzidx)&0x03);
+    int ctz2=0;
+    if (i&1) ctz2=0;
+    else if (i&0x03) ctz2=1;
+    else if (i&0x07) ctz2=2;
+    else if (i&0x0F) ctz2=3;
+    else if (i&0x1F) ctz2=4;
+    else if (i&0x3F) ctz2=5;
+    else if (i&0x7F) ctz2=6;
+    else if (i&0xFF) ctz2=7;
+    else if (i&0x1FF) ctz2=8;
+    else if (i&0x3FF) ctz2=9;
+    else if (i&0x7FF) ctz2=10;
+    else if (i&0xFFF) ctz2=11;
+    else if (i&0x1FFF) ctz2=12;
+    else if (i&0x3FFF) ctz2=13;
+    else if (i&0x7FFF) ctz2=14;
+    else if (i&0xFFFF) ctz2=15;
+    else ctz2=15;
+    if (ctz2!=ctz1)
+      dbgPoint();
+  }
+
+  for (int ii=0; ii<32; ii++)
+  {
+    unsigned int i=(1u<<ii);
+    int ctzidx=(((0x7DCD629*(i&-i))&0x7C000000)>>26);
+    int ctz1=((0x1771f350 >> ctzidx)&0x10) |
+             ((0xb4eb3a88 >> ctzidx)&0x08) |
+             ((0xed0b2175 >> ctzidx)&1)<<2 |
+             ((0x7c8b654a >> ctzidx)&0x02) |
+             ((0x4e16d969 >> ctzidx)&0x01);
+    if (ii==32)
+    {
+      if (ctz1!=31)
+        dbgPoint();
+    }
+    else if (ctz1!=ii)
+      dbgPoint();
+  }*/
+}
+
+
 /*double two_pow_n(unsigned int n)
 {
   assert(n<4096);

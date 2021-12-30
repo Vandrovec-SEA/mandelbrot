@@ -1,5 +1,13 @@
 #include "MandelEvaluator.hpp"
 #include <cmath>
+//has gcd since C++17 which I apparently don't have #include <numeric>
+
+#define USE_GCD_FOR_CHECKPERIOD 0
+
+void nop()
+{
+
+}
 
 LaguerrePoint::LaguerrePoint()
 {
@@ -80,7 +88,8 @@ void MandelPoint::assign(MandelMath::number_worker *worker, const MandelPoint &s
   worker->assign(&fc_c_im, &src.fc_c_im);
   worker->assign(&fz_c_mag, &src.fz_c_mag);
   lookper_startiter=src.lookper_startiter;
-  lookper_prevGuess=src.lookper_prevGuess;
+  lookper_prevGuess_=src.lookper_prevGuess_;
+  lookper_lastGuess=src.lookper_lastGuess;
   worker->assign(&lookper_startf_re, &src.lookper_startf_re);
   worker->assign(&lookper_startf_im, &src.lookper_startf_im);
   worker->assign(&lookper_nearr_dist, &src.lookper_nearr_dist);
@@ -125,7 +134,8 @@ void MandelPoint::zero(MandelMath::number_worker *worker, const MandelMath::numb
   worker->zero(&fc_c_re, 1);
   worker->zero(&fc_c_im, 0);
   worker->zero(&fz_c_mag, 1);
-  lookper_prevGuess=0;
+  lookper_prevGuess_=0;
+  lookper_lastGuess=0;
   //lookper resets at first iter
   near0iter=1;
   worker->assign(&near0f_re, c_re);
@@ -445,7 +455,7 @@ bool MandelEvaluator::startCompute(const MandelPoint *data, int quick_route)
   }
   currentData.assign(currentWorker, *data);
   if ((quick_route==1) ||
-      ((quick_route==0) && (currentParams.maxiter-currentData.iter<=1000)))
+      ((quick_route==0) && (currentParams.maxiter_-currentData.iter<=1000)))
   {
     //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
     evaluate();
@@ -472,6 +482,23 @@ void MandelEvaluator::doCompute()
   emit doneCompute(this);
 }
 
+void MandelEvaluator::startNewton(int period, const MandelMath::complex *c /*, currentData.f const *root, */)
+{
+  currentData.period=period;
+  currentWorker->assign(&currentParams.c_re, c->re_s);
+  currentWorker->assign(&currentParams.c_im, c->im_s);
+  QMetaObject::invokeMethod(this, &MandelEvaluator::doNewton, Qt::ConnectionType::QueuedConnection);
+}
+
+void MandelEvaluator::doNewton()
+{
+  MandelMath::complex tmpc(currentWorker, &currentParams.c_re, &currentParams.c_im, true);
+  MandelMath::complex root(currentWorker, &currentData.f_re, &currentData.f_im, true);
+  int result=newton(currentData.period, &tmpc, &root, true, 12);
+  emit doneNewton(this, result);
+}
+
+
 //result 0..derivatives or value too large, or other fail (divide by 0)
 //result>0 .. tried to return multiplicity but really returns just 1 (1 or >=3) or 2 (mult==2)
 int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool fastHoming, const int suggestedMultiplicity) //returns multiplicity
@@ -480,9 +507,11 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
   currentWorker->assign(&newt.bestr_re, r->re_s); //init, cleanup
   currentWorker->assign(&newt.bestr_im, r->im_s);
   bool movedOff=false;
-  double accyBound=3e-28/(period*period);
-  double accyBound2=3e-39*period/log(1+period)*1.5; //1.5=magic
+  //double accyBound=3e-28/(period*period);
+  //was for 80b floats double accyBound2=3e-39*period/log(1+period)*1.5; //1.5=magic
+  //double accyBound2=1.23e-32*period/log(1+period)*1.5; //1.5=magic
   double order1; // 1/highest power in the polynomial, 2^period in case of mandelbrot set
+  double r_mag_rough;
   int maxm;
   {
     currentWorker->assign(&newtres_.first_guess_lagu_re, r->re_s);
@@ -500,8 +529,30 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
     newtres_.first_neumaier2_re=r_re; newtres_.first_neumaier2_im=r_im;
     newtres_.first_lagu1_re=r_re; newtres_.first_lagu1_im=r_im;
     newtres_.first_lagu1o_re=r_re; newtres_.first_lagu1o_im=r_im;
-    newtres_.firstMu_re=1; newtres_.firstMu_im=0;
+    newtres_.firstMu_re_=1; newtres_.firstMu_im=0; newtres_.firstM=1;
+    newtres_.firstMum_re_=1; newtres_.firstMum_im_=0;
+    newtres_.accy_tostop_=1;
+    newtres_.accy_estimated_=1;
+
+    //ideally, I want max(abs(r_re), abs(c_re)) then round up to next power of 2
+    //but neither ilogb or frexp can do that so I round 1 to 2, 2 to 4
+    int lor=std::ilogb(r_re); //3->1 2->1 1->0  0.75->-1  0->-max
+    int loc=std::ilogb(currentWorker->toDouble(c->re_s));
+    if (lor<loc)
+      lor=loc;
+    if (lor<-2)
+      lor=-2;
+    r_re=ldexp(2, lor); //1->4  0->2  -2->0.5
+    lor=std::ilogb(r_im);
+    loc=std::ilogb(currentWorker->toDouble(c->im_s));
+    if (lor<loc)
+      lor=loc;
+    if (lor<-2)
+      lor=-2;
+    r_im=ldexp(2, lor);
+    r_mag_rough=r_re*r_re+r_im*r_im;
   }
+  //double accyBound=r_mag_rough*currentWorker->eps2()*period; //eps*sqrt(period) as eps bleeds out// 3e-28/(period*period);
   if (period<5)
   {
     maxm=ldexp(1, period-1); //in theory up to n-1 but for Mandelbrot that's rarely the case
@@ -519,7 +570,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
   }
   //maxm=1;
   //int multiplicity1=1;
-  int trustedMultiplicity=1;
+  int lastm=1;
   bool triedZeroGzrm=false;
   struct
   {
@@ -551,8 +602,6 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       bestfm=1e10;                       //  4 3    2
       //multiplicity1=1;                   //  4 5    1
     };
-    if (trustedMultiplicity>2) //tried some things and gave up
-      trustedMultiplicity=1;
     currentWorker->assign(&newt.f_r_re, r->re_s);
     currentWorker->assign(&newt.f_r_im, r->im_s);
     currentWorker->zero(&newtres_.fz_r_re, 1.0);
@@ -560,6 +609,11 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
     currentWorker->zero(&newt.fzz_r_re, 0);
     currentWorker->zero(&newt.fzz_r_im, 0);
     //TODO: can we skip computing fzz_r if order1<0? and remember last valid multiplicity or set it to 1
+    //always half of eps_cumul10   double eps_cumul05=0.5;
+    double eps_cumul10=1;
+    //very close to eps_cumul10   double err_cumul=0; //maybe sum(ln fz)/ln(final_fz) but similar to sum(1/fz)*final_fz
+    int err_simple=0;
+    double fc_re=0, fc_im=0;
     for (int i=0; i<period; i++)
     {
       double fzz_r_mag=currentWorker->toDouble(fzz_r.getMagTmp());
@@ -579,17 +633,33 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       fz_r.mul(&f_r);
       currentWorker->lshift(fz_r.re_s, 1);
       currentWorker->lshift(fz_r.im_s, 1);
+
+      //eps_cumul05=4*eps_cumul05*f_r_mag+0.5;
+      eps_cumul10=4*eps_cumul10*f_r_mag+1;
+      //err_cumul+=1/currentWorker->toDouble(fz_r.getMagTmp());
+      if (fz_r_mag<=1)
+        err_simple++;;
+      //fc=2*fc*f+1
+      double f_re=currentWorker->toDouble(f_r.re_s);
+      double f_im=currentWorker->toDouble(f_r.im_s);
+      double tmp=2*(f_re*fc_re-f_im*fc_im)+1;
+      fc_im=2*(f_im*fc_re+f_re*fc_im);
+      fc_re=tmp;
+
       //f:=f^2+c
       f_r.sqr();
       f_r.add(c);
     }
-    double fz_r_mag=currentWorker->toDouble(fz_r.getMagTmp()); //ff1m in original code
+    //double fz_r_mag=currentWorker->toDouble(fz_r.getMagTmp()); //ff1m in original code
     //g(r)=f(r)-r, gz(r)=fz(r)-1
     currentWorker->sub(f_r.re_s, r->re_s);
     currentWorker->sub(f_r.im_s, r->im_s);
     currentWorker->add_double(fz_r.re_s, -1);
     double g_r_mag=currentWorker->toDouble(f_r.getMagTmp());
     double gz_r_mag=currentWorker->toDouble(fz_r.getMagTmp());
+    //err_cumul*=fz_r_mag; //err_cumul->25774, eps_cumul10=25775, eps_cumul05=12888, simple=84
+    newtres_.accy_tostop_=eps_cumul10;
+    newtres_.accy_estimated_=1/gz_r_mag;
 #if CLEVER_FIX
 //c=-0.7499 p=2
 //  ideally, r=-0.5+-0.01i who are repelling  (and +0.5+-sqrt(0.9999) who are repel and attr)
@@ -609,10 +679,9 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       continue;
     };
 #endif
-    if (((trustedMultiplicity<=2) && (g_r_mag==0)) ||  //7e-33..4e-40 does not need more; much..5e-38 needs more
-        ((trustedMultiplicity>2) && (gz_r_mag<7e-38))) //6.2e-38 cannot improve due to rounding errors
+    if (g_r_mag==0)  //7e-33..4e-40 does not need more; much..5e-38 needs more
     { //r is good enough already      (f_c.re*f_c.re+f_c.im*f_c.im)/(f_zc.re*f_zc.re+f_zc.im*f_zc.im)
-      return trustedMultiplicity;
+      return lastm;
     };
     if (gz_r_mag==0)
     {
@@ -620,7 +689,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
         return 0;
       triedZeroGzrm=true;
     }
-    else if (trustedMultiplicity<=2)
+    else
     {
       if (gz_r_mag<1e-39)
       { //one more multi-iter?
@@ -635,15 +704,21 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       //the one legit reason to end: step<2^-53/|f'| (for |f'|<1) exactly because step*|f'|=2^-53
       //    |f|/|f'|<2^-53/|f'|
       //    |f|^2<2^-106=1.23e-32
-      if (g_r_mag<3.5*currentWorker->eps2()) //seen 3.246
-        return trustedMultiplicity;
+      //if (g_r_mag<1.0*r_mag_rough*currentWorker->eps2()) //maybe up to (1+gz_r_mag)*r_mag*eps2*log2(period)
+      //if (g_r_mag<eps_cumul10*r_mag_rough*currentWorker->eps2()) //maybe up to (1+gz_r_mag)*r_mag*eps2*log2(period)
+      if (g_r_mag<eps_cumul10*r_mag_rough*currentWorker->eps2())
+        return lastm;
+        //for per=11, rough=1, gz_m=0.13: around 6.3<x/eps<3.2 (biggest that won't improve < x <smallest that will improve)
+        //for per=20, rough=0.5, gz=0.0216: 0.063<x<0.5
+        //for per=94, rough=1, gz_m=0.56: 9.3<x<~61; gz_m=6e-5: 9.1<x<7.3
+        //for per=63(7), rough=4, gz_m=1.5e-6: 9.9<x<5.6
 
 
-      if (((gz_r_mag>1e-6) && (g_r_mag/gz_r_mag<accyBound)) || //((fm<NEWTON_EPSILON) and (ffm>1e-6)) or //check just f on single roots
-          ((g_r_mag<1e-20) && (g_r_mag/gz_r_mag<accyBound)) || //for high period - and high derivative - we cannot minimize f given the finite precision of root
+      if (//maybe eps2*period but 1e-29 is too much ((gz_r_mag>1e-6) && (g_r_mag/gz_r_mag<accyBound)) || //((fm<NEWTON_EPSILON) and (ffm>1e-6)) or //check just f on single roots
+          //(should be handled with newer eps computation   (g_r_mag<1e-20) && (g_r_mag/gz_r_mag<accyBound)) || //for high period - and high derivative - we cannot minimize f given the finite precision of root
            ((gz_r_mag<1e-6) && (g_r_mag/gz_r_mag<2.1e-30)))   //check f/ff on multiple roots
       { //r is good enough already
-        return trustedMultiplicity;
+        return lastm;
       };
       if ((g_r_mag<2e-38) && (gz_r_mag<3e-9)) //ffm: >8e-10
       { //close to be but not multiple
@@ -652,17 +727,17 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
         else
           return 1;
       };
-      if ((fz_r_mag>0.5) && (g_r_mag/fz_r_mag<accyBound2))
+      /*if ((fz_r_mag>0.5) && (g_r_mag/fz_r_mag<accyBound2))
       { //cannot improve because of limited precision
-        return trustedMultiplicity;
-      };
+        return lastm;
+      };*/
     };
     if (currentWorker->isequal(r->re_s, &newt.bestr_re) &&
         currentWorker->isequal(r->im_s, &newt.bestr_im) &&
         (bestfm<1e10) && (newtonCycle>2)) //Lagu can cycle in first 2 cycles
     { //Laguerre can cycle (at least my version), e.g. per=2, c=-0.6640625-0.015625i, r=-0.614213552325963974-0,0179149806499481201i
-      if (g_r_mag<3.5*currentWorker->eps2()) //should be tested above but maybe use different margin here?
-        return trustedMultiplicity;
+      if (g_r_mag<5*eps_cumul10*r_mag_rough*currentWorker->eps2()) //should be tested above but maybe use different margin here?
+        return lastm;
       return 0; //just fail and try again next time
     };
     if (g_r_mag<bestfm)
@@ -846,13 +921,30 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       else
         m=qRound(G2HT_re/H_mag);
 #else //m= some func of mu where mu is solution of ((1-1/n)*H/G^2-1/n) mu^2 + mu/n -1=0
+      //with m as input:                           ((1-m/n)*H/G^2-1/n) mu^2 + m/n mu -m = 0
+      //solve for m=mu:   (f'^2-f''*f)/n*m^2 -(f'^2-f''*f) m + f'^2=0
+      //               or H/n m^2 - H m + G^2=0
+      double mum_re=1, mum_im=0; //better than mu?
+      double h_re=currentWorker->toDouble(laguH.re_s);
+      double h_im=currentWorker->toDouble(laguH.im_s);
+      double g2_re=currentWorker->toDouble(laguG2.re_s);
+      double g2_im=currentWorker->toDouble(laguG2.im_s);
+      MandelMath::complex_double_quadratic(&mum_re, &mum_im,
+          h_re*order1, h_im*order1,
+          -h_re/2, -h_im/2,
+          g2_re, g2_im);
+      if (newtonCycle==0)
+      {
+        newtres_.firstMum_re_=mum_re;
+        newtres_.firstMum_im_=mum_im;
+      };
       double G2_mag=currentWorker->toDouble(laguG2.getMagTmp());
       if (G2_mag<0.01)
       {
         m=1;
         if (newtonCycle==0)
         {
-          newtres_.firstMu_re=1;
+          newtres_.firstMu_re_=1;
           newtres_.firstMu_im=0;
         };
       }
@@ -868,17 +960,19 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
         MandelMath::complex_double_quadratic(&mu_re, &mu_im, a_re, a_im, order1, 0, -1, 0);
         if (newtonCycle==0)
         {
-          newtres_.firstMu_re=mu_re;
+          newtres_.firstMu_re_=mu_re;
           newtres_.firstMu_im=mu_im;
         };
         if (mu_re<1.3)
           m=1;
-        else if (abs(mu_im)>mu_re/2)
+        else {/*if (abs(mu_im)>mu_re/2)
           m=1;
         else
         {
           double mu_mag=mu_re*mu_re+mu_im*mu_im;
           m=qRound(sqrt(mu_mag)); //or just round mu_re?
+          */
+          m=qRound(mu_re);
           if (m>maxm)
             m=maxm;
         }
@@ -1129,13 +1223,10 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
         newtres_.first_lagu1o_re=r_re-newtres_.first_lagu1o_re;
         newtres_.first_lagu1o_im=r_im-newtres_.first_lagu1o_im;
       };
-    if ((g_r_mag<1e-10) && (gz_r_mag<1e-6) && (trustedMultiplicity<=2))
-    {
-      trustedMultiplicity=m;
-    };
+    lastm=m;
     bool lagu_valid=false;
     bool newt_valid=false;
-    if ((trustedMultiplicity<=2) && (order1>=0))
+    if (order1>=0)
     {
       // a=1/(G/n +- sqrt( (1/m-1/n)*(H-G^2/n) ))
       // all but last few cycles can be done just in double precision
@@ -1181,7 +1272,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       //  we can leave this to the caller
       //return 0;
     };
-    if (fz_r_mag!=0)
+    if (gz_r_mag!=0)
     {
       //newton near multiroot:
       //f=(x-a)^m   f'=m*(x-a)^(m-1)  f/f'=(x-a)/m
@@ -1191,7 +1282,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       currentWorker->assign(newtX.im_s, fz_r.im_s);
       newtX.recip();
       newtX.mul(&f_r); //f/f'
-      currentWorker->zero(&newt.tmp2, trustedMultiplicity);
+      currentWorker->zero(&newt.tmp2, m);
       currentWorker->mul(newtX.re_s, &newt.tmp2);
       currentWorker->mul(newtX.im_s, &newt.tmp2);
       newt_valid=true;
@@ -1243,7 +1334,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
       {//take the smaller of newton and laguerre to a) avoid Newton's jumps when moving off the real axis, b) avoid Laguerre skipping to far root
         double N_mag=currentWorker->toDouble(newtX.getMagTmp());
         double L_mag=currentWorker->toDouble(laguX.getMagTmp());
-        if (N_mag>L_mag)
+        if (N_mag*1.05>L_mag) //5% will do no harm, and switch to Lagu can speed up convergence
         {
           currentWorker->assign(newtX.re_s, laguX.re_s);
           currentWorker->assign(newtX.im_s, laguX.im_s);
@@ -1258,7 +1349,7 @@ int MandelEvaluator::newton(int period, const complex *c, complex *r, const bool
     currentWorker->sub(r->re_s, newtX.re_s);
     currentWorker->sub(r->im_s, newtX.im_s);
   } //for newtonCycle
-  return trustedMultiplicity;
+  return lastm;
 }
 
 //result=0 means the period check failed; -1 means the check failed and the root returned is invalid
@@ -1270,9 +1361,9 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
     return -1;
   };
   int aroundCount; //estimate multiplicity (mult-1)
-  if ((currentData.lookper_prevGuess>0) &&
-      ((eval.lookper_lastGuess % currentData.lookper_prevGuess)==0))
-    aroundCount=eval.lookper_lastGuess / currentData.lookper_prevGuess;
+  if ((currentData.lookper_prevGuess_>0) &&
+      ((currentData.lookper_lastGuess % currentData.lookper_prevGuess_)==0))
+    aroundCount=currentData.lookper_lastGuess / currentData.lookper_prevGuess_;
   else
     aroundCount=0;
   //look for root nearest to C - better stability of newton/laguerre
@@ -1301,6 +1392,8 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
 
   complex f_r(currentWorker, &newt.f_r_re, &newt.f_r_im, true);
   complex fz_r(currentWorker, &newtres_.fz_r_re, &newtres_.fz_r_im, true);
+  //double dist_around=5*currentWorker->eps2()/currentWorker->toDouble(fz_r.getMagTmp());
+  double dist_around=5*(newtres_.accy_estimated_*newtres_.accy_tostop_)*currentWorker->eps2();
   currentWorker->assign(f_r.re_s, root.re_s);
   currentWorker->assign(f_r.im_s, root.im_s);
   currentWorker->zero(fz_r.re_s, 1);
@@ -1308,6 +1401,9 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   const MandelMath::number_store *fz_mag=nullptr;
   aroundCount=0;
   bool someBelow1=false;
+
+  //TODO: try to guess the radius of "around" roots   double dist_around=newt.fz*2/fzz  f(r+x)=r+x=r+f'x+f''x^2/2
+
   //int firstBelow1=-1;
   int firstBelow1dividing=-1;
   for (int i=0; i<period; i++)
@@ -1322,18 +1418,25 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
         {
           //needs more checks than that, e.g. fz_mag^(period/i) <=~ final fz_mag
           //per-actual  per-found  root-found   |   status at short
-          //  long        short         x           won't happen because |fz|<1
-          //  short       short       short         |f-r|<eps
+          //  short       short       short         no long to loop over
           //  short       short        long         does not solve newton
           //  short        long       short         |f-r|<eps
-          //  short        long        long         |f-r| big, |fz|<1 ... I think   !!
+          //  short        long        long         |fz|>1
+          //  long        short       short         |fz|>1
+          //  long        short        long         does not solve newton
           //  long         long       short         |fz|>1
-          //  long         long        long         |fz|>1
+          //  long         long        long         no short to test
           //if (currentWorker->isle(f_r.getMagTmp(), root.getMagTmp()))
           double dist=currentWorker->toDouble(f_r.dist2_tmp(&root));
-          if (dist<3.4e-28) //related to newton's accyBound=3e-28/period^2
+          if (dist<dist_around)//3.4e-28) //related to newton's accyBound=3e-28/period^2
             firstBelow1dividing=i; //short long short
-          //but how to identify short long long ?
+          else if (dist>1e-7)
+          { }
+          else
+          {
+            nop();
+          }
+          //does "else" even exist? should be always true? 0.00804 vs 1e-31 nope
         };
     };
     //fm could hardly be >4 since it's tested in Newton (as well as f_z_r, BTW)
@@ -1351,6 +1454,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   };
   //what's going on here -.-  normally we would check |ff|<1 or something
   //maybe that's what I'm doing but with some extra tricks for high precision?
+  //reduce fz_re, fz_im to 2nd octant
   if (currentWorker->isle0(fz_r.re_s)) currentWorker->chs(fz_r.re_s);
   if (currentWorker->isle0(fz_r.im_s)) currentWorker->chs(fz_r.im_s);
   bool fz_r_mag_over1;
@@ -1360,7 +1464,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
     currentWorker->assign(fz_r.re_s, fz_r.im_s);
     currentWorker->assign(fz_r.im_s, &newt.tmp2);
   };
-  //im>=re
+  //im>=re, now check re^2+im^2>1
   if ((currentWorker->toDouble(fz_r.re_s)>=0.71) ||
       (currentWorker->toDouble(fz_r.im_s)>=1.01))
   { //im>=re>=0.71
@@ -1644,14 +1748,14 @@ void MandelEvaluator::evaluate()
   MandelMath::complex lookper_startf(currentWorker, &currentData.lookper_startf_re, &currentData.lookper_startf_im, true);
   MandelMath::complex lookper_nearr(currentWorker, &eval.lookper_nearr_re, &eval.lookper_nearr_im, true);
 
-  for (int iter=currentData.iter; iter<currentParams.maxiter; iter++)
+  for (; currentData.iter<currentParams.maxiter_; currentData.iter++)
   {
-    if (iter%(3*currentData.near0iter) ==0)
+    if (currentData.iter%(3*currentData.near0iter) ==0)
     {
-      int quot=iter/(3*currentData.near0iter);
+      int quot=currentData.iter/(3*currentData.near0iter);
       if ((quot&(quot-1))==0) //also at iter==0
       { // //need k*iter for f' to start at the worst moment to reduce false positives; need k*iter-1 for good near0 -> switch to nearc
-        currentData.lookper_startiter=iter;
+        currentData.lookper_startiter=currentData.iter;
         currentWorker->assign(&currentData.lookper_startf_re, f.re_s);
         currentWorker->assign(&currentData.lookper_startf_im, f.im_s);
         //MandelMath::complex lookper_bestf(currentWorker, &eval.lookper_startf_re, &eval.lookper_startf_im, true);
@@ -1659,14 +1763,14 @@ void MandelEvaluator::evaluate()
         //currentWorker->zero(&eval.lookper_bestf_im, 0);
         currentWorker->assign(&eval.lookper_nearr_re, f.re_s);
         currentWorker->assign(&eval.lookper_nearr_im, f.im_s);
-        if (iter<=1)
+        if (currentData.iter<=1)
           currentWorker->assign(&currentData.lookper_nearr_dist, f.getMagTmp());
         else
           currentWorker->assign(&currentData.lookper_nearr_dist, f.dist2_tmp(&c));
         //currentWorker->zero(&eval.lookper_dist2, 1e10); //4.0 should be enough
         //mands.period stays there
         //currentData.lookper_prevGuess=0; //TODO: used for anything?
-        eval.lookper_lastGuess=0;
+        currentData.lookper_lastGuess=0;
         currentWorker->zero(&currentData.lookper_totalFzmag, 1.0);
       };
     }
@@ -1674,7 +1778,6 @@ void MandelEvaluator::evaluate()
     if (currentWorker->toDouble(f_mag)>4)
     {
       currentData.state=MandelPoint::State::stOutside;
-      currentData.iter=iter;
       //theory says the relative error in estimate is less than 3/bailout for large bailout
       //so lets move out a bit
       eval_until_bailout(&c, &f, &fc_c); //may switch state to stBoundary
@@ -1734,7 +1837,7 @@ void MandelEvaluator::evaluate()
       }
       //already there currentWorker->assign(currentData.fc_c_re, &fc_c_re);
       //currentWorker->assign(currentData.fc_c_im, &fc_c_im);
-      currentData.period=eval.lookper_lastGuess; //preliminary
+      currentData.period=currentData.lookper_lastGuess; //preliminary
       if (currentData.period<1)
         currentData.period=1;
       return;
@@ -1743,7 +1846,6 @@ void MandelEvaluator::evaluate()
     if (fc_c_mag>1e57)
     {
       currentData.state=MandelPoint::State::stBoundary;
-      currentData.iter=iter;
       currentData.exterior_avoids=0;
       currentData.exterior_hits=0;
       return;
@@ -1752,7 +1854,6 @@ void MandelEvaluator::evaluate()
     if (fz_c_mag>1e60)
     {
       currentData.state=MandelPoint::State::stDiverge;
-      currentData.iter=iter;
       currentData.exterior_avoids=0;
       currentData.exterior_hits=0;
       return;
@@ -1783,7 +1884,7 @@ void MandelEvaluator::evaluate()
 
     if (!currentWorker->isle(&eval.near0fmag, f_mag)) //f_mag<near0fmag
     {
-      currentData.near0iter=iter+2;
+      currentData.near0iter=currentData.iter+2;
       currentWorker->assign(&currentData.near0f_re, f.re_s);
       currentWorker->assign(&currentData.near0f_im, f.im_s);
       currentWorker->assign(&eval.near0fmag, f_mag);
@@ -1795,20 +1896,27 @@ void MandelEvaluator::evaluate()
       currentWorker->assign(&eval.lookper_nearr_re, f.re_s);
       currentWorker->assign(&eval.lookper_nearr_im, f.im_s);
       currentWorker->assign(&currentData.lookper_nearr_dist, lpdiff);
-      currentData.lookper_prevGuess=eval.lookper_lastGuess;
-      eval.lookper_lastGuess=(iter+1-currentData.lookper_startiter);
+      currentData.lookper_prevGuess_=currentData.lookper_lastGuess;
+      currentData.lookper_lastGuess=(currentData.iter+1-currentData.lookper_startiter);
     };
 
-    if ((eval.lookper_lastGuess>0) &&
-        (eval.lookper_lastGuess==(iter+1-currentData.lookper_startiter)) && //just found new guess
-         (//actually period<=near0iter ((eval.lookper_lastGuess % currentData.near0iter)==0) ||  //either nearest divides period, or
-          ((currentData.near0iter % eval.lookper_lastGuess)==0)) && //  period divides nearest, that's a fact
-         ((iter>=3*currentData.near0iter)))  //speedup - don't check period too eagerly
+    if ((currentData.lookper_lastGuess>0) &&
+        (currentData.lookper_lastGuess==(currentData.iter+1-currentData.lookper_startiter)) && //just found new guess
+#if USE_GCD_FOR_CHECKPERIOD
+#else
+        ((currentData.near0iter % currentData.lookper_lastGuess)==0) && //  period divides nearest, that's a fact
+#endif
+        ((currentData.iter>=3*currentData.near0iter)))  //speedup - don't check period too eagerly
     {
+#if USE_GCD_FOR_CHECKPERIOD
+      int testperiod=MandelMath::gcd(currentData.near0iter, currentData.lookper_lastGuess);//currentData.lookper_lastGuess
+#else
+      int testperiod=currentData.lookper_lastGuess;
+#endif
       int foundperiod=-1;
       if (f.isequal(&lookper_startf))
       { //exact match - misiurewicz or converged after too many steps
-        foundperiod=eval.lookper_lastGuess;
+        foundperiod=currentData.lookper_lastGuess;
         currentWorker->assign(&currentData.root_re, f.re_s);
         currentWorker->assign(&currentData.root_im, f.im_s);
         //TODO: still needs period cleanup... I think. Near 0+0I
@@ -1820,9 +1928,9 @@ void MandelEvaluator::evaluate()
         //periodEntered:=getTime64();
         //if (currentWorker->toDouble(c.re_s)==-0.015625 && currentWorker->toDouble(c.im_s)==0.640625)
           //dbgPoint();
-        foundperiod=periodCheck(eval.lookper_lastGuess, &c); //updates iter, f, f_c, root
+        foundperiod=periodCheck(testperiod, &c); //updates iter, f, f_c, root
         //profiler.timeInPeriod:=profiler.timeInPeriod+(getTime64()-periodEntered);
-        if ((foundperiod>0) && (foundperiod<eval.lookper_lastGuess))
+        if ((foundperiod>0) && (foundperiod<testperiod))
         {
           complex root(currentWorker, &currentData.root_re, &currentData.root_im, true);
           //complex interiorComplex(currentWorker, &interior.inte_re, &interior.inte_im, true);
@@ -1833,7 +1941,6 @@ void MandelEvaluator::evaluate()
       if (foundperiod>0)
       {
         currentData.state=MandelPoint::State::stPeriod2;
-        currentData.iter=iter;
         currentData.period=foundperiod;
         complex root(currentWorker, &currentData.root_re, &currentData.root_im, true);
         currentData.period=estimateInterior(foundperiod, &c, &root);
@@ -1851,11 +1958,15 @@ void MandelEvaluator::evaluate()
         //currentWorker->assign(&currentData.fc_c_im, &eval.fz_r_im);
         return;
       };
+      if (currentParams.breakOnNewNearest)
+      {
+        currentData.iter++;
+        break;
+      }
     };
 
   }
   //data.state=MandelPoint::State::stMaxIter;
-  currentData.iter=currentParams.maxiter;
 }
 
 #else
@@ -1964,5 +2075,6 @@ MandelEvaluator::ComputeParams::ComputeParams():
 {
   epoch=-1;
   pixelIndex=-1;
-  maxiter=1;
+  maxiter_=1;
+  breakOnNewNearest=false;
 }

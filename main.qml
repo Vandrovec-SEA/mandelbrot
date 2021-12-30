@@ -107,9 +107,14 @@ Window {
             if (rbuttonViewMand.checked)
               mandelModel.paintOrbit(mandelImageCombiner.getOverlayImage(), mouse.x, mouse.y);
             if (rbuttonViewLagu.checked)
+            {
               laguerreModel.paintOrbit(laguerreImageCombiner.getOverlayImage(), mouse.x, mouse.y);
+              if (laguerreModel==null)
+                console.log("laguModel missing in action");
+            }
             //labelCX.text=mouse.x;
             //labelCY.text=mouse.y;
+            laguerreModel.getTimes();
         }
         onPressed: {
             if (mouse.button==Qt.LeftButton)
@@ -260,6 +265,7 @@ Window {
             };
             if (rbuttonViewLagu.checked)
             {
+              laguerreModel.getTimes();
               laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
               laguerreImageCombiner.update();
               labelXY.text=laguerreModel.getTextXY();
