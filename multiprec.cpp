@@ -53,6 +53,11 @@ void multiprec::sqr()
   mul(this);
 }
 
+double multiprec::radixfloor()
+{
+  return 1;
+}
+
 void multiprec::recip()
 {
 }
@@ -63,6 +68,12 @@ void multiprec::sqrt()
 
 int multiprec::round()
 {
+  return 0;
+}
+
+int multiprec::compare(const multiprec *other)
+{
+  (void)other;
   return 0;
 }
 
@@ -84,6 +95,11 @@ bool multiprec::isle(const multiprec *other)
 }
 
 bool multiprec::isle0()
+{
+  return false;
+}
+
+bool multiprec::isl0()
 {
   return false;
 }

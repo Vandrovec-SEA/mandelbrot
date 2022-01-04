@@ -36,13 +36,14 @@ struct MandelPoint
   MandelMath::number_store fz_c_mag;
   int lookper_startiter, lookper_prevGuess_, lookper_lastGuess;
   MandelMath::number_store lookper_startf_re, lookper_startf_im;
-  MandelMath::number_store lookper_nearr_dist_; z bool lookper_nearr_dist_touched;
+  MandelMath::number_store lookper_nearr_dist_;
+  bool lookper_nearr_dist_touched; //check if equal but only once; in theory should only happen at dist=0
   MandelMath::number_store lookper_totalFzmag;
   int near0iter;
   MandelMath::number_store near0f_re, near0f_im; //TODO: delete? useless
   int period;
   MandelMath::number_store root_re, root_im;
-  int iter;
+  int iter, newton_iter;
   double exterior_hits, exterior_avoids; //upper and lower bound
   double interior;
   MandelPoint &operator =(MandelPoint &src) = delete;
@@ -113,7 +114,7 @@ public:
   struct NewtRes
   {
     int cyclesNeeded;
-    double firstM;
+    //now firstMum_re double firstM;
     MandelMath::number_store fz_r_re, fz_r_im;
     MandelMath::number_store first_guess_lagu_re, first_guess_lagu_im;
     MandelMath::number_store first_guess_newt_re, first_guess_newt_im;
@@ -125,7 +126,7 @@ public:
     //double first_lagum_re, first_lagum_im;
     double first_lagu1_re, first_lagu1_im, first_lagu1o_re, first_lagu1o_im;
     double firstMu_re_, firstMu_im, firstMum_re_, firstMum_im_;
-    double accy_tostop_, accy_estimated_; //in units of eps2()
+    double accy_tostop, accy_multiplier; //in units of eps2()
   } newtres_;
 protected:
   typedef MandelMath::complex complex;
@@ -147,7 +148,7 @@ protected:
     //MandelMath::number_store fz_r_re, fz_r_im;
     MandelMath::number_store fzz_r_re, fzz_r_im;
     MandelMath::number_store tmp1_re, tmp1_im;
-    MandelMath::number_store fzfix_re, fzfix_im;
+    //MandelMath::number_store fzfix_re, fzfix_im;
     MandelMath::number_store laguH_re, laguH_im;
     MandelMath::number_store laguG_re, laguG_im;
     MandelMath::number_store laguG2_re, laguG2_im;

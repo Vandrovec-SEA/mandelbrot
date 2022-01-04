@@ -880,7 +880,8 @@ void MandelModel::writeToImage(ShareableImageWrapper image)
             } break;
             case MandelPoint::State::stMaxIter:
             {
-              image.image->setPixel(x, y, 0xff808080);
+              //image.image->setPixel(x, y, 0xff808080);
+              image.image->setPixel(x, y, 0xff000000);
               knownenum=true;
             } break;
           }
@@ -1077,8 +1078,18 @@ void MandelModel::writeToImage(ShareableImageWrapper image)
             case MandelPoint::State::stPeriod2:
             case MandelPoint::State::stPeriod3:
             {
+              /*int ti=data->newton_iter; //very noisy, maybe show <=10, >10, >30, 49
+              int r;
+              if (ti<=10)
+                r=0x60;
+              else if (ti<30)
+                r=0x90;
+              else
+                r=0xff;
+              image.image->setPixel(x, y, 0xff000000+(r<<16));*/
+
               int ti=data->near0iter;
-              if (ti>=0)
+              if (ti>0)
               {
                 int tj=0;
                 while ((ti%2)==0) { tj+=128*2/5; ti/=2; }

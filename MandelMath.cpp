@@ -482,6 +482,17 @@ void number_worker_double::sqr(number_store *store)
   store->as.doubl*=store->as.doubl;
 }
 
+double number_worker_double::radixfloor(number_store *store1, number_store *store2)
+{
+  assert(store1->dbgType==Type::typeDouble);
+  assert(store2->dbgType==Type::typeDouble);
+  int ilog1=std::ilogb(store1->as.doubl);
+  int ilog2=std::ilogb(store2->as.doubl);
+  if (ilog1<ilog2)
+    ilog1=ilog2;
+  return ldexp(1, ilog1);
+}
+
 void number_worker_double::recip(number_store *store)
 {
   assert(store->dbgType==Type::typeDouble);
@@ -492,6 +503,18 @@ void number_worker_double::sqrt(number_store *store)
 {
   assert(store->dbgType==Type::typeDouble);
   store->as.doubl=std::sqrt(store->as.doubl);
+}
+
+int number_worker_double::compare(const number_store *store, const number_store *other)
+{
+  assert(store->dbgType==Type::typeDouble);
+  assert(other->dbgType==Type::typeDouble);
+  if (store->as.doubl==other->as.doubl)
+    return 0;
+  else if (store->as.doubl<other->as.doubl)
+    return -1;
+  else
+    return +1;
 }
 
 bool number_worker_double::isequal(const number_store *store, const number_store *other)
@@ -518,6 +541,12 @@ bool number_worker_double::isle0(const number_store *store)
 {
   assert(store->dbgType==Type::typeDouble);
   return store->as.doubl<=0;
+}
+
+bool number_worker_double::isl0(const number_store *store)
+{
+  assert(store->dbgType==Type::typeDouble);
+  return store->as.doubl<0;
 }
 
 bool number_worker_double::isl1(const number_store *store)
@@ -637,6 +666,17 @@ void number_worker_ddouble::sqr(number_store *store)
   store->as.ddouble_.dd->sqr();
 }
 
+double number_worker_ddouble::radixfloor(number_store *store1, number_store *store2)
+{
+  assert(store1->dbgType==Type::typeDDouble);
+  assert(store2->dbgType==Type::typeDDouble);
+  double rf1=store1->as.ddouble_.dd->radixfloor();
+  double rf2=store2->as.ddouble_.dd->radixfloor();
+  if (rf1<rf2)
+    return rf2;
+  return rf1;
+}
+
 void number_worker_ddouble::recip(number_store *store)
 {
   assert(store->dbgType==Type::typeDDouble);
@@ -647,6 +687,13 @@ void number_worker_ddouble::sqrt(number_store *store)
 {
   assert(store->dbgType==Type::typeDDouble);
   store->as.ddouble_.dd->sqrt();
+}
+
+int number_worker_ddouble::compare(const number_store *store, const number_store *other)
+{
+  assert(store->dbgType==Type::typeDDouble);
+  assert(other->dbgType==Type::typeDDouble);
+  return store->as.ddouble_.dd->compare(other->as.ddouble_.dd);
 }
 
 bool number_worker_ddouble::isequal(const number_store *store, const number_store *other)
@@ -673,6 +720,12 @@ bool number_worker_ddouble::isle0(const number_store *store)
 {
   assert(store->dbgType==Type::typeDDouble);
   return store->as.ddouble_.dd->isle0();
+}
+
+bool number_worker_ddouble::isl0(const number_store *store)
+{
+  assert(store->dbgType==Type::typeDDouble);
+  return store->as.ddouble_.dd->isl0();
 }
 
 bool number_worker_ddouble::isl1(const number_store *store)
@@ -794,6 +847,17 @@ void number_worker_multi::sqr(number_store *store)
   store->as.multi_.bytes->sqr();
 }
 
+double number_worker_multi::radixfloor(number_store *store1, number_store *store2)
+{
+  assert(store1->dbgType==Type::typeMulti);
+  assert(store2->dbgType==Type::typeMulti);
+  double rf1=store1->as.multi_.bytes->radixfloor();
+  double rf2=store2->as.multi_.bytes->radixfloor();
+  if (rf1<rf2)
+    return rf2;
+  return rf1;
+}
+
 void number_worker_multi::recip(number_store *store)
 {
   assert(store->dbgType==Type::typeMulti);
@@ -804,6 +868,13 @@ void number_worker_multi::sqrt(number_store *store)
 {
   assert(store->dbgType==Type::typeMulti);
   store->as.multi_.bytes->sqrt();
+}
+
+int number_worker_multi::compare(const number_store *store, const number_store *other)
+{
+  assert(store->dbgType==Type::typeMulti);
+  assert(other->dbgType==Type::typeMulti);
+  return store->as.multi_.bytes->compare(other->as.multi_.bytes);
 }
 
 bool number_worker_multi::isequal(const number_store *store, const number_store *other)
@@ -830,6 +901,12 @@ bool number_worker_multi::isle0(const number_store *store)
 {
   assert(store->dbgType==Type::typeMulti);
   return store->as.multi_.bytes->isle0();
+}
+
+bool number_worker_multi::isl0(const number_store *store)
+{
+  assert(store->dbgType==Type::typeMulti);
+  return store->as.multi_.bytes->isl0();
 }
 
 bool number_worker_multi::isl1(const number_store *store)
@@ -869,6 +946,20 @@ const number_store *complex::getMagTmp()
   worker->assign(&tmp2_s, im_s);
   worker->sqr(&tmp2_s);
   worker->add(&tmp1_s, &tmp2_s);
+  return &tmp1_s;
+}
+
+const number_store *complex::getMag1Tmp()
+{
+  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  worker->assign(&tmp1_s, re_s);
+  worker->sqr(&tmp1_s);
+  worker->assign(&tmp2_s, im_s);
+  worker->sqr(&tmp2_s);
+  worker->add(&tmp1_s, &tmp2_s);
+  worker->add_double(&tmp1_s, -1);
   return &tmp1_s;
 }
 
@@ -999,6 +1090,11 @@ bool complex::isequal(const complex *other)
 {
   return worker->isequal(re_s, other->re_s) &&
       worker->isequal(im_s, other->im_s);
+}
+
+double sqr_double(double x)
+{
+  return x*x;
 }
 
 void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in_im)

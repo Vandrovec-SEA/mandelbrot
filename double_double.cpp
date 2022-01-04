@@ -237,6 +237,12 @@ void dd_real::sqr()
   quick_two_sum(p.hi, p.lo);
 }
 
+double dd_real::radixfloor()
+{
+  int ilog1=std::ilogb(hi);
+  return ldexp(1, ilog1);
+}
+
 void dd_real::recip()
 {
 #if 1 //sloppy_div
@@ -324,6 +330,20 @@ void dd_real::sqrt()
   //return dd_real::add(ax, (a - dd_real::sqr(ax)).x[0] * (x * 0.5));
 }
 
+int dd_real::compare(const dd_real *other)
+{
+  if (hi<other->hi)
+    return -1;
+  else if (hi>other->hi)
+    return +1;
+  else if (lo<other->lo)
+    return -1;
+  else if (lo>other->lo)
+    return +1;
+  else
+    return 0;
+}
+
 bool dd_real::isequal(const dd_real *other)
 {
   return (hi==other->hi) && (lo==other->lo);
@@ -343,9 +363,12 @@ bool dd_real::isle(const dd_real *other)
 
 bool dd_real::isle0()
 {
-  if (hi!=0)
-    return hi<0;
-  return lo<=0;
+  return hi<=0;
+}
+
+bool dd_real::isl0()
+{
+  return hi<0;
 }
 
 bool dd_real::isl1()

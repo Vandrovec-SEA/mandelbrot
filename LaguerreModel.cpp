@@ -568,11 +568,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   orbit.evaluator.newton(params.period, &base, &root, true, 12);
   //orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
   orbit.pointData.iter=orbit.evaluator.newtres_.cyclesNeeded;
-  orbit.pointData.firstM=orbit.evaluator.newtres_.firstM;
-  //guess and paint accyBound
-  /*double fz_re=orbit.worker->toDouble(&orbit.evaluator.newtres_.fz_r_re);
-  double fz_im=orbit.worker->toDouble(&orbit.evaluator.newtres_.fz_r_im);
-  double estimated_accuracy=sqrt(5*params.period*orbit.worker->eps2()/(fz_re*fz_re+fz_im*fz_im));*/
+  orbit.pointData.firstM=orbit.evaluator.newtres_.firstMum_re_;
   orbit.worker->assign(&orbit.pointData.fz_r_re, &orbit.evaluator.newtres_.fz_r_re);
   orbit.worker->add_double(&orbit.pointData.fz_r_re, 1);
   orbit.worker->assign(&orbit.pointData.fz_r_im, &orbit.evaluator.newtres_.fz_r_im);
@@ -597,11 +593,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawLine(circ_x-2, circ_y+2, circ_x+2, circ_y-2);
     //size of r that maps to 1 epsilon: about the width of transition from >0 to <0
-    int circ_r=ldexp(sqrt(orbit.evaluator.newtres_.accy_estimated_*orbit.worker->eps2()), position.step_log);
+    int circ_r=ldexp(sqrt(orbit.evaluator.newtres_.accy_tostop*orbit.worker->eps2()), position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
       painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
     //size of r that maps to a few epsilon: the accuracy of root and also size of the dead pool
-    circ_r=ldexp(sqrt((orbit.evaluator.newtres_.accy_tostop_*orbit.evaluator.newtres_.accy_estimated_)*orbit.worker->eps2()), position.step_log);
+    circ_r=ldexp(sqrt((orbit.evaluator.newtres_.accy_tostop*orbit.evaluator.newtres_.accy_multiplier)*orbit.worker->eps2()), position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
       painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
   };
@@ -998,7 +994,7 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
         position.worker->add_double(&point->fz_r_re, 1);
         position.worker->assign(&point->fz_r_im, &me->newtres_.fz_r_im);
         point->iter=me->newtres_.cyclesNeeded;
-        point->firstM=me->newtres_.firstM;
+        point->firstM=me->newtres_.firstMum_re_;
       }
     }
   }

@@ -40,12 +40,15 @@ public:
   virtual void rsub(number_store *store, const number_store *other)=0;
   virtual void mul(number_store *store, const number_store *other)=0;
   virtual void sqr(number_store *store)=0;
+  virtual double radixfloor(number_store *store1, number_store *store2)=0; //nearest smaller power of 2 (1.5->1->1)
   virtual void recip(number_store *store)=0;
   virtual void sqrt(number_store *store)=0;
+  virtual int compare(const number_store *store, const number_store *other)=0; //return -1 if <, 0 if =, +1 if >
   virtual bool isequal(const number_store *store, const number_store *other)=0; //return store==other
   virtual bool is0(const number_store *store)=0;
   virtual bool isle(const number_store *store, const number_store *other)=0; //return store<=other
   virtual bool isle0(const number_store *store)=0; //return store<=0
+  virtual bool isl0(const number_store *store)=0; //return store<0
   virtual bool isl1(const number_store *store)=0; //return store<1
 
   virtual QString toString(const number_store *store)=0;
@@ -130,12 +133,15 @@ public:
   void rsub(number_store *store, const number_store *other) override;
   void mul(number_store *store, const number_store *other) override;
   void sqr(number_store *store) override;
+  double radixfloor(number_store *store1, number_store *store2) override; //nearest smaller power of 2 (1.5->1->1)
   void recip(number_store *store) override;
   void sqrt(number_store *store) override;
+  int compare(const number_store *store, const number_store *other) override; //return -1 if <, 0 if =, +1 if >
   bool isequal(const number_store *store, const number_store *other) override;
   bool is0(const number_store *store) override;
   bool isle(const number_store *store, const number_store *other) override;
   bool isle0(const number_store *store) override;
+  bool isl0(const number_store *store) override;
   bool isl1(const number_store *store) override;
 
   QString toString(const number_store *store) override;
@@ -166,12 +172,15 @@ public:
   void rsub(number_store *store, const number_store *other) override;
   void mul(number_store *store, const number_store *other) override;
   void sqr(number_store *store) override;
+  double radixfloor(number_store *store1, number_store *store2) override; //nearest smaller power of 2 (1.5->1->1)
   void recip(number_store *store) override;
   void sqrt(number_store *store) override;
+  int compare(const number_store *store, const number_store *other) override; //return -1 if <, 0 if =, +1 if >
   bool isequal(const number_store *store, const number_store *other) override;
   bool is0(const number_store *store) override;
   bool isle(const number_store *store, const number_store *other) override;
   bool isle0(const number_store *store) override;
+  bool isl0(const number_store *store) override;
   bool isl1(const number_store *store) override;
 
   QString toString(const number_store *store) override;
@@ -202,12 +211,15 @@ public:
   void rsub(number_store *store, const number_store *other) override;
   void mul(number_store *store, const number_store *other) override;
   void sqr(number_store *store) override;
+  double radixfloor(number_store *store1, number_store *store2) override; //nearest smaller power of 2 (1.5->1->1)
   void recip(number_store *store) override;
   void sqrt(number_store *store) override;
+  int compare(const number_store *store, const number_store *other) override; //return -1 if <, 0 if =, +1 if >
   bool isequal(const number_store *store, const number_store *other) override;
   bool is0(const number_store *store) override;
   bool isle(const number_store *store, const number_store *other) override;
   bool isle0(const number_store *store) override;
+  bool isl0(const number_store *store) override;
   bool isl1(const number_store *store) override;
 
   QString toString(const number_store *store) override;
@@ -229,6 +241,7 @@ template <> struct number_to_type<number_worker_multi>
 { static const number_worker::Type ntype=number_worker::Type::typeMulti; };
 */
 
+double sqr_double(double x); //no one ever needed this function before year 2022, right?
 void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in_im); //res_re>=0
 void complex_double_quadratic(double *res_re, double *res_im,
                               double a_re, double a_im, double b2_re, double b2_im, double c_re, double c_im);
@@ -266,6 +279,7 @@ public:
   number_store *im_s;
   //could use assign(const complex *)
   const number_store *getMagTmp();
+  const number_store *getMag1Tmp();
   //could use double toMagDouble();, assuming toDouble is cheaper than mul
   //could use lshift
   void add(const complex *other);

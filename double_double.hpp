@@ -24,12 +24,15 @@ public:
   void add(double h2, double l2);
   void mul(double h2, double l2);
   void sqr();
+  double radixfloor(); //nearest smaller power of 2 (1.5->1->1)
   void recip();
   void sqrt();
+  int compare(const dd_real *other); //return -1 if <, 0 if =, +1 if >
   bool isequal(const dd_real *other);
   bool is0();
   bool isle(const dd_real *other);
   bool isle0();
+  bool isl0();
   bool isl1();
 };
 
