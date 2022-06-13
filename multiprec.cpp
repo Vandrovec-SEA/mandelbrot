@@ -23,7 +23,17 @@ void multiprec::lshift(int shoft)
   (void)shoft;
 }
 
-void multiprec::frac_pos()
+void multiprec::round()
+{
+
+}
+
+void multiprec::frac()
+{
+
+}
+
+void multiprec::mod1()
 {
 
 }
@@ -66,7 +76,7 @@ void multiprec::sqrt()
 {
 }
 
-int multiprec::round()
+int multiprec::toround()
 {
   return 0;
 }

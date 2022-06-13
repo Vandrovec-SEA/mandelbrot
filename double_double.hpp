@@ -10,23 +10,28 @@ class dd_real {
 protected:
   inline void quick_two_sum(double a, double b);
   inline void two_sum(double a, double b);
-  inline void split(double a);
+  //made public for debugging inline void split(double a);
   inline void two_prod(double a, double b);
   inline void two_sqr(double a);
 public:
-  dd_real(): hi(0), lo(0) { }
+  inline void split(double a);
+  dd_real(): hi(0), lo_(0) { }
   double hi;
-  double lo;
-  void assign(const dd_real &src) { hi=src.hi; lo=src.lo; }
-  void chs() { hi=-hi; lo=-lo; }
+  double lo_; // !!can have other sign than hi!!
+  void assign(const dd_real &src) { hi=src.hi; lo_=src.lo_; }
+  void chs() { hi=-hi; lo_=-lo_; }
   void lshift(int exp); //*=2^exp
   void add_double(double h2);
+  void mul_double(double h2);
   void add(double h2, double l2);
   void mul(double h2, double l2);
   void sqr();
   double radixfloor(); //nearest smaller power of 2 (1.5->1->1)
   void recip();
   void sqrt();
+  void round();
+  void frac();
+  void mod1();
   int compare(const dd_real *other); //return -1 if <, 0 if =, +1 if >
   bool isequal(const dd_real *other);
   bool is0();
@@ -34,6 +39,8 @@ public:
   bool isle0();
   bool isl0();
   bool isl1();
+
+  inline void checksigns();
 };
 
 } // namespace MandelMath

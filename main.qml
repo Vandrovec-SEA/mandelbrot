@@ -35,7 +35,7 @@ Window {
 
     ButtonGroup { id: bgroupView }
     Column {
-        anchors.left: toprow.right
+        anchors.right: comboColumn.left
         anchors.top: parent.top;
         id: rgroupView
         RadioButton {
@@ -55,20 +55,60 @@ Window {
         }
     }
 
-    ComboBox {
+    Column {
+        id: comboColumn
+        anchors.top: parent.top;
         anchors.right: parent.right
-        textRole: "text"
-        valueRole: "key"
-        currentIndex: 1 //cls
-        model: ListModel {
-            id: mymodel
-            ListElement { text: "Kind"; key: 0 }//mandelModel.paintStyleKind }
-            ListElement { text: "Cls"; key: 1 }//mandelModel.paintStyleCls }
-            ListElement { text: "Exter"; key: 2 }//mandelModel.paintStyleExter  }
-            ListElement { text: "Inter"; key: 3 }//mandelModel.paintStyleInter  }
-            ListElement { text: "Near"; key: 4 }//mandelModel.paintStyleNear  }
+        Row {
+            anchors.right: parent.right
+            Rectangle {
+                id: busyIndicator
+                width: 20
+                height: 20
+                radius: 10
+                color: "blue"
+            }
+            ComboBox {
+                textRole: "text"
+                valueRole: "key"
+                currentIndex: 1 //cls
+                model: ListModel {
+                    id: paintstyle_model
+                    ListElement { text: "Kind"; key: 0 }//mandelModel.paintStyleKind }
+                    ListElement { text: "Cls"; key: 1 }//mandelModel.paintStyleCls }
+                    ListElement { text: "Exter"; key: 2 }//mandelModel.paintStyleExter  }
+                    ListElement { text: "Inter"; key: 3 }//mandelModel.paintStyleInter  }
+                    ListElement { text: "Near"; key: 4 }//mandelModel.paintStyleNear  }
+                    ListElement { text: "d/dz"; key: 5 }//mandelModel.paintStyleFZ  }
+                    ListElement { text: "d/dc"; key: 6 }//mandelModel.paintStyleFC  }
+                }
+                onActivated: mandelModel.selectedPaintStyle=paintstyle_model.get(currentIndex).key;
+            }
         }
-        onActivated: mandelModel.selectedPaintStyle=mymodel.get(currentIndex).key;
+        Row {
+            anchors.right: parent.right
+            Text {
+                id: busyIndicator2
+                text: "0"
+            }
+            ComboBox {
+                textRole: "text"
+                valueRole: "key"
+                currentIndex: 0 //double
+                model: ListModel {
+                    id: precision_model
+                    ListElement { text: "Double"; key: 0 }
+                    ListElement { text: "DDouble"; key: 1 }
+                    //ListElement { text: "QDouble"; key: 2 }
+                    ListElement { text: "Multi"; key: 3 }
+                }
+                onActivated:
+                {
+                    mandelModel.selectedPrecision=precision_model.get(currentIndex).key;
+                    laguerreModel.selectedPrecision=precision_model.get(currentIndex).key;
+                }
+            }
+        }
     }
 
     MouseArea {
@@ -233,7 +273,7 @@ Window {
                     ]
                     MenuItem {
                         text: modelData.caption
-                        onTriggered: mandelModel.setView(modelData.viewRe, modelData.viewIm, modelData.viewZoom);
+                        onTriggered: mandelModel.setView_double(modelData.viewRe, modelData.viewIm, modelData.viewZoom);
                     }
                 }
             }
@@ -262,6 +302,8 @@ Window {
               labelXY.text=mandelModel.getTextXY();
               labelInfoGen.text=mandelModel.getTextInfoGen();
               labelInfoSpec.text=mandelModel.getTextInfoSpec();
+              busyIndicator.color=(mandelModel.threadsWorking===0?"green":mandelModel.threadsWorking===mandelModel.threadsMax?"red":"yellow")
+              busyIndicator2.text=mandelModel.threadsWorking
             };
             if (rbuttonViewLagu.checked)
             {

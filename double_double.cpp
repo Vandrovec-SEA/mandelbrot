@@ -31,9 +31,11 @@ void fpu_fix_start(unsigned int *old_cw) {
   /* Win 32 MSVC */
   unsigned int cw = _control87(0, 0);
   #ifndef _WIN64 //why can't switch precision? why do they return value that is not in use?
-  if ((cw & 0x00030000) != 0x00010000)
-    _control87(0x00010000, 0x00030000);
+  if ((cw & _MCW_PC) != _PC_53)
+    _control87(_PC_53, _MCW_PC);
   #endif
+  if ((cw&_MCW_RC)!=_RC_NEAR)
+    _control87(_RC_NEAR, _MCW_RC);
   if (old_cw) {
     *old_cw = cw;
   }
@@ -93,7 +95,8 @@ void fpu_fix_end(unsigned int *old_cw) {
 inline void dd_real::quick_two_sum(double a, double b)
 {
   hi = a + b;
-  lo = b + (a - hi);
+  lo_ = b + (a - hi);
+  checksigns();
 }
 
 /* Computes fl(a-b) and err(a-b).  Assumes |a| >= |b| */
@@ -108,7 +111,8 @@ inline void dd_real::two_sum(double a, double b)
 {
   hi = a + b;
   double bb = hi - a;
-  lo = (a - (hi - bb)) + (b - bb);
+  lo_ = (a - (hi - bb)) + (b - bb);
+  checksigns();
 }
 
 /* Computes fl(a-b) and err(a-b).  */
@@ -127,14 +131,15 @@ inline void dd_real::split(double a)
     a *= 3.7252902984619140625e-09;  // 2^-28
     temp = _QD_SPLITTER * a;
     hi = temp - (temp - a);
-    lo = a - hi;
+    lo_ = a - hi;
     hi *= 268435456.0;          // 2^28
-    lo *= 268435456.0;          // 2^28
+    lo_ *= 268435456.0;          // 2^28
   } else {
-    temp = _QD_SPLITTER * a;
-    hi = temp - (temp - a);
-    lo = a - hi;
+    temp = _QD_SPLITTER * a; //a=a1*2^27+a2*1  temp=a1*2^54+(a1+a2)*2^27 +(a2)*1
+    hi = temp - (temp - a);  //temp-a=a1*2^54+a2*2^27    temp-(temp-a)=a1*2^27
+    lo_ = a - hi;
   }
+  checksigns();
 }
 
 /* Computes fl(a*b) and err(a*b). */
@@ -145,7 +150,8 @@ inline void dd_real::two_prod(double a, double b)
   hi = a * b;
   aa.split(a);
   bb.split(b);
-  lo = ((aa.hi * bb.hi - hi) + aa.hi * bb.lo + aa.lo * bb.hi) + aa.lo * bb.lo;
+  lo_ = ((aa.hi * bb.hi - hi) + aa.hi * bb.lo_ + aa.lo_ * bb.hi) + aa.lo_ * bb.lo_;
+  checksigns();
 }
 
 /* Computes fl(a*a) and err(a*a).  Faster than the above method. */
@@ -154,7 +160,20 @@ inline void dd_real::two_sqr(double a)
   dd_real aa;
   hi = a * a;
   aa.split(a);
-  lo = ((aa.hi * aa.hi - hi) + 2.0 * aa.hi * aa.lo) + aa.lo * aa.lo;
+  lo_ = ((aa.hi * aa.hi - hi) + 2.0 * aa.hi * aa.lo_) + aa.lo_ * aa.lo_;
+  checksigns();
+}
+
+void dd_real::checksigns()
+{
+  //it's actually legal to have hi>0, lo<0
+  /*if (((hi>0) && (lo<0)) ||
+      ((hi<0) && (lo>0)))
+  {
+    int x;
+    x=3;
+    x++;
+  }*/
 }
 
 //hack if you don't want to mess with FPU control word... but is a nightmare
@@ -166,15 +185,26 @@ void dd_real::lshift(int exp)
   //        by a power of two using arithmetic operators"
   //should I just adjust exponent in *(int *)&hi or what
   hi=ldexp(hi, exp);
-  lo=ldexp(lo, exp);
+  lo_=ldexp(lo_, exp);
+  checksigns();
 }
 
 void dd_real::add_double(double h2)
 {
   dd_real se;
   se.two_sum(hi, h2);
-  se.lo += lo;
-  quick_two_sum(se.hi, se.lo);
+  se.lo_ += lo_;
+  quick_two_sum(se.hi, se.lo_);
+  checksigns();
+}
+
+void dd_real::mul_double(double h2)
+{
+  dd_real p;
+  p.two_prod(hi, h2);
+  p.lo_ += lo_*h2;
+  quick_two_sum(p.hi, p.lo_);
+  checksigns();
 }
 
 void dd_real::add(double h2, double l2)
@@ -183,8 +213,8 @@ void dd_real::add(double h2, double l2)
   dd_real se;
 
   se.two_sum(hi, h2);
-  se.lo += (lo + l2);
-  quick_two_sum(se.hi, se.lo);
+  se.lo_ += (lo_ + l2);
+  quick_two_sum(se.hi, se.lo_);
 
 //1998 inline.h#operator +(const doubledouble& x is the same as dd_inline.h#dd_real::ieee_add
 /*
@@ -198,6 +228,7 @@ void dd_real::add(double h2, double l2)
   s.lo += t.lo;
   quick_two_sum(s.hi, s.lo);
 */
+  checksigns();
 }
 
 void dd_real::mul(double h2, double l2)
@@ -205,8 +236,8 @@ void dd_real::mul(double h2, double l2)
   dd_real p;
 
   p.two_prod(hi, h2);
-  p.lo += (hi * l2 + lo * h2);
-  quick_two_sum(p.hi, p.lo);
+  p.lo_ += (hi * l2 + lo_ * h2);
+  quick_two_sum(p.hi, p.lo_);
 /*
   double hx, tx, hy, ty, C, c;
   double th, tl;
@@ -225,6 +256,7 @@ void dd_real::mul(double h2, double l2)
   hx = MAKE_DOUBLE(th, C-hi);
   lo = MAKE_DOUBLE(tl, c+hx);
 */
+  checksigns();
 }
 
 void dd_real::sqr()
@@ -232,9 +264,10 @@ void dd_real::sqr()
   dd_real p;
   dd_real s;
   p.two_sqr(hi);
-  p.lo += 2.0 * hi * lo;
-  p.lo += lo * lo;
-  quick_two_sum(p.hi, p.lo);
+  p.lo_ += 2.0 * hi * lo_;
+  p.lo_ += lo_ * lo_;
+  quick_two_sum(p.hi, p.lo_);
+  checksigns();
 }
 
 double dd_real::radixfloor()
@@ -254,10 +287,10 @@ void dd_real::recip()
 
   /* compute  this - q1 * dd */
   r.hi=hi;
-  r.lo=lo;
+  r.lo_=lo_;
   r.mul(q1, 0);
   s1 = two_diff(1, r.hi, s2);
-  s2 -= r.lo;
+  s2 -= r.lo_;
   s2 += 0;
 
   /* get next approximation */
@@ -288,6 +321,7 @@ void dd_real::recip()
   quick_two_sum(q1, q2);
   add(q3, 0);
 #endif
+  checksigns();
 }
 
 void dd_real::sqrt()
@@ -305,14 +339,14 @@ void dd_real::sqrt()
   if (hi<0) {
     //dbgPoint();
     hi=0;
-    lo=0;
+    lo_=0;
     return;
   };
 
   if (hi<=0)
   {
     hi=0;
-    lo=0;
+    lo_=0;
     return;
   };
 
@@ -321,13 +355,83 @@ void dd_real::sqrt()
   double ax = hi * x;
   dd_real result;
   result.hi=ax;
-  result.lo=0;
+  result.lo_=0;
   result.sqr();
-  add(-result.hi, -result.lo);
+  add(-result.hi, -result.lo_);
   hi*=(x*0.5);
-  lo=0;
+  lo_=0;
   add(ax, 0);
   //return dd_real::add(ax, (a - dd_real::sqr(ax)).x[0] * (x * 0.5));
+  checksigns();
+}
+
+void dd_real::round()
+{
+  //if lo==+-0.5 exactly, we should decide based on hi whether to round to +-1 or 0 but who cares
+  //or could do this+=2^103-=2^103 or something like that
+  if ((lo_<=-0.5) || (lo_>=0.5))
+  {
+    //hi=round(hi);
+    lo_=std::round(lo_);
+  }
+  else
+  {
+    hi=std::round(hi);
+    lo_=0;
+  }
+}
+
+void dd_real::frac()
+{
+  if ((lo_<=-0.5) || (lo_>=0.5))
+  {
+    if ((hi<0))// && (lo_>=0.5))
+    { //-1000+0.75 -> -0.25
+      //-1000-0.75 -> -0.75
+      hi=lo_-std::ceil(lo_);
+      lo_=0;
+    }
+    else //if ((hi>0) && (lo_<=-0.5))
+    { //1000-0.75 -> 0.25
+      //1000+0.75 -> 0.75
+      hi=lo_-std::floor(lo_);
+      lo_=0;
+    }
+    /*else if (lo_>0)
+    { //1000+0.75
+      hi=lo_-floor(lo_);
+      lo_=0;
+    }
+    else
+    { //-1000-0.75 -> -0.75
+      hi=lo_-ceil(lo_);
+      lo_=0;
+    }*/
+  }
+  else
+  {
+    if (hi<0)
+      add_double(-std::ceil(hi));
+    else
+      add_double(-std::floor(hi));
+  }
+}
+
+void dd_real::mod1()
+{
+  if ((lo_<=-0.5) || (lo_>=0.5))
+  {
+    //1000+0.75->0.75
+    //1000-0.75->0.25
+    //-1000+0.75->0.75
+    //-1000-0.75->0.25
+    hi=lo_-floor(lo_);
+    lo_=0;
+  }
+  else
+  {
+    add_double(-std::floor(hi));
+  }
 }
 
 int dd_real::compare(const dd_real *other)
@@ -336,9 +440,9 @@ int dd_real::compare(const dd_real *other)
     return -1;
   else if (hi>other->hi)
     return +1;
-  else if (lo<other->lo)
+  else if (lo_<other->lo_)
     return -1;
-  else if (lo>other->lo)
+  else if (lo_>other->lo_)
     return +1;
   else
     return 0;
@@ -346,7 +450,7 @@ int dd_real::compare(const dd_real *other)
 
 bool dd_real::isequal(const dd_real *other)
 {
-  return (hi==other->hi) && (lo==other->lo);
+  return (hi==other->hi) && (lo_==other->lo_);
 }
 
 bool dd_real::is0()
@@ -358,7 +462,7 @@ bool dd_real::isle(const dd_real *other)
 {
   if (hi!=other->hi)
     return hi<other->hi;
-  return lo<=other->lo;
+  return lo_<=other->lo_;
 }
 
 bool dd_real::isle0()

@@ -11,6 +11,7 @@ LaguerreModel::LaguerreModel(): QObject(), position()
   unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
   MandelMath::fpu_fix_start(&oldcw);
   _selectedPaintStyle=paintStyleCls;//Kind;
+  _selectedPrecision=precisionDouble;
   epoch=0;
   imageWidth=0;
   imageHeight=0;
@@ -23,10 +24,10 @@ LaguerreModel::LaguerreModel(): QObject(), position()
   orbit.first_mum_re_=0;
   orbit.first_mum_im_=0;
   params.period=1;
-  position.worker->init(&params.base_re_s_, 0);
-  position.worker->init(&params.base_im_s, 0);
-  position.worker->init(&params.root_re_s, 0);
-  position.worker->init(&params.root_im_s, 0);
+  position.worker->init_(&params.base_re_s_, &params.base_re_p, 0);
+  position.worker->init_(&params.base_im_s, &params.base_im_p, 0);
+  position.worker->init_(&params.root_re_s, &params.root_re_p, 0);
+  position.worker->init_(&params.root_im_s, &params.root_im_p, 0);
   //threadCount=4;
   //threadCount=1;//so fast that sending messages is slower QThread::idealThreadCount()-1;
   threadCount=QThread::idealThreadCount()-1;
@@ -43,6 +44,8 @@ LaguerreModel::LaguerreModel(): QObject(), position()
   QObject::connect(this, &LaguerreModel::doneWork,
                    this, &LaguerreModel::giveWork1,
                    Qt::ConnectionType::QueuedConnection);
+  QObject::connect(this, &LaguerreModel::selectedPrecisionChange,
+                   this, &LaguerreModel::selectedPrecisionChanged);
 }
 
 LaguerreModel::~LaguerreModel()
@@ -125,7 +128,8 @@ QString LaguerreModel::getTextInfoGen()
   int orbit_x, orbit_y;
   {
     MandelMath::number_store tmp;
-    orbit.worker->init(&tmp);
+    MandelMath::number_place tmp_p;
+    orbit.worker->init_(&tmp, &tmp_p);
     orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_re);
     orbit.worker->sub(&tmp, &position.center_re_s);
     orbit_x=qRound(orbit.worker->toDouble(&tmp)/position.step_size__)+imageWidth/2;
@@ -162,7 +166,8 @@ QString LaguerreModel::getTextInfoSpec()
   int orbit_x, orbit_y;
   {
     MandelMath::number_store tmp;
-    orbit.worker->init(&tmp);
+    MandelMath::number_place tmp_p;
+    orbit.worker->init_(&tmp, &tmp_p);
     orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_re);
     orbit.worker->sub(&tmp, &position.center_re_s);
     orbit_x=qRound(orbit.worker->toDouble(&tmp)/position.step_size__)+imageWidth/2;
@@ -221,13 +226,14 @@ void LaguerreModel::setParams(ShareableViewInfo viewInfo)
     position.worker->assign(&params.root_im_s, &viewInfo.root_im);
 
     MandelMath::number_store old_cre_s, old_cim_s;
-    position.worker->init(&old_cre_s);
-    position.worker->init(&old_cim_s);
+    MandelMath::number_place old_cre_p, old_cim_p;
+    position.worker->init_(&old_cre_s, &old_cre_p);
+    position.worker->init_(&old_cim_s, &old_cim_p);
     position.worker->assign(&old_cre_s, &position.center_re_s);
     position.worker->assign(&old_cim_s, &position.center_im_s);
     int old_step_log=position.step_log;
 
-    position.setView(position.worker->toDouble(&viewInfo.re_), position.worker->toDouble(&viewInfo.im), viewInfo.scale);
+    position.setView(&viewInfo.re_, &viewInfo.im, viewInfo.scale);
 
     transformStore(pointStore, 0, 0, &old_cre_s, &old_cim_s,
                    pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
@@ -291,10 +297,11 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
     delta_x_int-=(new_width/2)<<step_scale_n_shift;
   }
 
-  MandelMath::number_store c_im;
   MandelMath::number_store c_re;
-  position.worker->init(&c_im);
-  position.worker->init(&c_re);
+  MandelMath::number_store c_im;
+  MandelMath::number_place cre_p, cim_p;
+  position.worker->init_(&c_re, &cre_p);
+  position.worker->init_(&c_im, &cim_p);
   for (int newy=0; newy<new_height; newy++)
   {
     int oldy;
@@ -353,11 +360,12 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
   position.worker->cleanup(&c_im);
 }
 
-void LaguerreModel::setView(double c_re, double c_im, double scale)
+void LaguerreModel::setView_(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale)
 {
   MandelMath::number_store old_cre_s, old_cim_s;
-  position.worker->init(&old_cre_s);
-  position.worker->init(&old_cim_s);
+  MandelMath::number_place old_cre_p, old_cim_p;
+  position.worker->init_(&old_cre_s, &old_cre_p);
+  position.worker->init_(&old_cim_s, &old_cim_p);
   position.worker->assign(&old_cre_s, &position.center_re_s);
   position.worker->assign(&old_cim_s, &position.center_im_s);
   int old_step_log=position.step_log;
@@ -378,8 +386,9 @@ void LaguerreModel::drag(double delta_x, double delta_y)
 {
   //qDebug()<<"drag ("<<delta_x<<","<<delta_y<<")";
   MandelMath::number_store old_cre_s, old_cim_s;
-  position.worker->init(&old_cre_s);
-  position.worker->init(&old_cim_s);
+  MandelMath::number_place old_cre_p, old_cim_p;
+  position.worker->init_(&old_cre_s, &old_cre_p);
+  position.worker->init_(&old_cim_s, &old_cim_p);
   position.worker->assign(&old_cre_s, &position.center_re_s);
   position.worker->assign(&old_cim_s, &position.center_im_s);
 
@@ -401,8 +410,9 @@ void LaguerreModel::drag(double delta_x, double delta_y)
 void LaguerreModel::zoom(double x, double y, int inlog)
 {
   MandelMath::number_store old_cre_s, old_cim_s;
-  position.worker->init(&old_cre_s);
-  position.worker->init(&old_cim_s);
+  MandelMath::number_place old_cre_p, old_cim_p;
+  position.worker->init_(&old_cre_s, &old_cre_p);
+  position.worker->init_(&old_cim_s, &old_cim_p);
   position.worker->assign(&old_cre_s, &position.center_re_s);
   position.worker->assign(&old_cim_s, &position.center_im_s);
   int old_step_log=position.step_log;
@@ -437,8 +447,9 @@ void LaguerreModel::setImageSize(int width, int height)
     newStore[i].init(position.worker);
 
   MandelMath::number_store old_cre_s, old_cim_s;
-  position.worker->init(&old_cre_s);
-  position.worker->init(&old_cim_s);
+  MandelMath::number_place old_cre_p, old_cim_p;
+  position.worker->init_(&old_cre_s, &old_cre_p);
+  position.worker->init_(&old_cim_s, &old_cim_p);
   position.worker->assign(&old_cre_s, &position.center_re_s);
   position.worker->assign(&old_cim_s, &position.center_im_s);
 
@@ -455,6 +466,52 @@ void LaguerreModel::setImageSize(int width, int height)
   pointStore=newStore;
   imageWidth=width;
   imageHeight=height;
+
+  startNewEpoch();
+}
+
+void LaguerreModel::setWorker(MandelMath::number_worker *newWorker)
+{
+  if ((imageWidth<=0) || (imageHeight<=0)) //Qt begins with width=0, height=-13
+    return;
+  /*
+  int newLength=imageWidth*imageHeight;
+  LaguerrePoint *newStore=new LaguerrePoint[newLength];
+  QString size_as_text=QString::number(sizeof(LaguerrePoint)*newLength);
+  for (int pos=size_as_text.length()-3; pos>0; pos-=3)
+  {
+    size_as_text.insert(pos, '\'');
+  }
+  qDebug()<<"laguerreStore uses"<<size_as_text.toLocal8Bit().constData()<<"B"; //lots of work to skip those quotes... can't skip spaces at all
+  for (int i=0; i<newLength; i++)
+    newStore[i].init(position.worker);
+
+  MandelMath::number_store old_cre_s, old_cim_s;
+  position.worker->init(&old_cre_s);
+  position.worker->init(&old_cim_s);
+  position.worker->assign(&old_cre_s, &position.center_re_s);
+  position.worker->assign(&old_cim_s, &position.center_im_s);
+
+  MandelMath::number_worker *oldWorker=position.worker;
+  position.setNumberType(newWorker->ntype());
+
+  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
+                 newStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
+                 oldWorker, 0, position.step_log);
+
+  oldWorker->cleanup(&old_cim_s);
+  oldWorker->cleanup(&old_cre_s);
+
+  for (int i=imageWidth*imageHeight-1; i>=0; i--)
+    pointStore[i].cleanup(oldWorker);
+  delete[] pointStore;
+  pointStore=newStore;
+  */
+  MandelMath::number_worker::Type oldType=position.worker->ntype();
+  position.setNumberType(newWorker->ntype());
+  for (int i=imageWidth*imageHeight-1; i>=0; i--)
+    pointStore[i].promote(oldType, position.worker->ntype());
+
 
   startNewEpoch();
 }
@@ -495,11 +552,12 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   //LaguerrePoint *data=&pointStore[y*imageWidth+x];
   if (orbit.worker!=position.worker)
   {
-    if (orbit.worker)
-    {
-      orbit.pointData.cleanup(orbit.worker);
-    };
-    orbit.pointData.init(position.worker);
+    MandelMath::number_worker::Type oldType, newType=position.worker->ntype();
+    if (orbit.worker==nullptr)
+      oldType=MandelMath::number_worker::Type::typeEmpty;
+    else
+      oldType=orbit.worker->ntype();
+    orbit.pointData.promote(oldType, newType);
     orbit.worker=position.worker;
   };
   /*switch (data->state)
@@ -569,9 +627,9 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   //orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
   orbit.pointData.iter=orbit.evaluator.newtres_.cyclesNeeded;
   orbit.pointData.firstM=orbit.evaluator.newtres_.firstMum_re_;
-  orbit.worker->assign(&orbit.pointData.fz_r_re, &orbit.evaluator.newtres_.fz_r_re);
+  orbit.worker->assign(&orbit.pointData.fz_r_re, &orbit.evaluator.newtres_.fz_r_re_);
   orbit.worker->add_double(&orbit.pointData.fz_r_re, 1);
-  orbit.worker->assign(&orbit.pointData.fz_r_im, &orbit.evaluator.newtres_.fz_r_im);
+  orbit.worker->assign(&orbit.pointData.fz_r_im, &orbit.evaluator.newtres_.fz_r_im_);
   orbit.pointData.naiveChoice=orbit.evaluator.newtres_.naiveChoice;
   orbit.first_mu_re_=orbit.evaluator.newtres_.firstMu_re_;
   orbit.first_mu_im=orbit.evaluator.newtres_.firstMu_im;
@@ -786,18 +844,18 @@ void LaguerreModel::writeToImage(ShareableImageWrapper image)
   //QImage result(imageWidth, imageHeight, QImage::Format::Format_ARGB32);//setPixel in _Premultiplied affects surrounding pixels?! _Premultiplied);
   if (image.image->isNull() || (image.image->width()!=imageWidth) || (image.image->height()!=imageHeight))
     return;
-  MandelMath::number_store point_re;
+  /*MandelMath::number_store point_re;
   MandelMath::number_store point_im;
   position.worker->init(&point_re);
   position.worker->init(&point_im);
-  MandelMath::complex tmp_point(position.worker, &point_re, &point_im, false);
+  MandelMath::complex tmp_point(position.worker, &point_re, &point_im, false);*/
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
       bool knownenum=false;
       LaguerrePoint *data=&pointStore[y*imageWidth+x];
-      position.pixelXtoRE(x-imageWidth/2, tmp_point.re_s);
-      position.pixelYtoIM(imageHeight/2-y, tmp_point.im_s);
+      /*position.pixelXtoRE(x-imageWidth/2, tmp_point.re_s);
+      position.pixelYtoIM(imageHeight/2-y, tmp_point.im_s);*/
       //if ((x==222) && (y==170))
         //data->state=MandelPoint::State::stOutside;
       switch (_selectedPaintStyle)
@@ -990,9 +1048,9 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
         //point->assign(position.worker, me->currentData);
         position.worker->assign(&point->f_re, &me->currentData.f_re); //root
         position.worker->assign(&point->f_im, &me->currentData.f_im);
-        position.worker->assign(&point->fz_r_re, &me->newtres_.fz_r_re);
+        position.worker->assign(&point->fz_r_re, &me->newtres_.fz_r_re_);
         position.worker->add_double(&point->fz_r_re, 1);
-        position.worker->assign(&point->fz_r_im, &me->newtres_.fz_r_im);
+        position.worker->assign(&point->fz_r_im, &me->newtres_.fz_r_im_);
         point->iter=me->newtres_.cyclesNeeded;
         point->firstM=me->newtres_.firstMum_re_;
       }
@@ -1012,6 +1070,34 @@ void LaguerreModel::donePixel(MandelEvaluator *me, int result)
   giveWork(me);
 }
 
+void LaguerreModel::selectedPrecisionChanged()
+{
+  MandelMath::number_worker::Type oldType;
+  if (position.worker==nullptr)
+    oldType=MandelMath::number_worker::Type::typeEmpty;
+  else
+    oldType=position.worker->ntype();
+  switch (_selectedPrecision)
+  {
+    case precisionDouble: setWorker(&position.number_worker_double_template); break;
+    case precisionDDouble: setWorker(&position.number_worker_ddouble_template); break;
+    case precisionQDouble: setWorker(&position.number_worker_ddouble_template); break;
+    case precisionMulti: setWorker(&position.number_worker_multi_template); break;
+  }
+  MandelMath::number_worker::Type newType=position.worker->ntype();
+  if (orbit.worker!=nullptr)
+  {
+    assert(orbit.worker->ntype()==oldType);
+    orbit.pointData.promote(oldType, newType);
+    orbit.evaluator.switchType(position.worker);
+    orbit.worker=position.worker;
+  };
+  params.base_re_s_.promote_(oldType, newType, &params.base_re_p);
+  params.base_im_s.promote_(oldType, newType, &params.base_im_p);
+  params.root_re_s.promote_(oldType, newType, &params.root_re_p);
+  params.root_im_s.promote_(oldType, newType, &params.root_im_p);
+}
+
 LaguerreModel::Position::Position():
   worker(nullptr),
   center_re_s(),
@@ -1020,8 +1106,6 @@ LaguerreModel::Position::Position():
   setNumberType(MandelMath::number_worker::Type::typeDouble);
   worker->zero(&center_re_s, -0.5);
   worker->zero(&center_im_s, 0.0);
-  //center_re_n.reinit(MandelMath::number::Type::typeDDouble);
-  //center_im_n.reinit(MandelMath::number::Type::typeDDouble);
   step_log=7;
   step_size__=1.0/128;
   updateCachedDepth();
@@ -1038,17 +1122,25 @@ LaguerreModel::Position::~Position()
 
 void LaguerreModel::Position::setNumberType(MandelMath::number_worker::Type ntype)
 {
-  //TODO: try to convert old value to new
+  MandelMath::number_worker::Type oldType;
   if (worker!=nullptr)
+    oldType=worker->ntype();
+  else
+    oldType=MandelMath::number_worker::Type::typeEmpty;
+  center_re_s.promote_(oldType, ntype, &center_re_p);
+  center_im_s.promote_(oldType, ntype, &center_im_p);
+  /*if (worker!=nullptr)
   {
     worker->cleanup(&center_re_s);
     worker->cleanup(&center_im_s);
-  }
+  }*/
   switch (ntype)
   {
+#if NUMBER_DOUBLE_EXISTS
     case MandelMath::number_worker::Type::typeDouble:
       worker=&number_worker_double_template;
       break;
+#endif //NUMBER_DOUBLE_EXISTS
     case MandelMath::number_worker::Type::typeDDouble:
       worker=&number_worker_ddouble_template;
       break;
@@ -1058,19 +1150,29 @@ void LaguerreModel::Position::setNumberType(MandelMath::number_worker::Type ntyp
     case MandelMath::number_worker::Type::typeEmpty:
       worker=nullptr;
   }
-  if (worker)
+  /*if (worker)
   {
     worker->init(&center_re_s);
     worker->init(&center_im_s);
-  };
+  };*/
 }
 
-void LaguerreModel::Position::setView(double c_re, double c_im, double scale)
+void LaguerreModel::Position::setView(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale)
 {
   step_log=-ilogb(scale);
   step_size__=ldexp(1.0, -step_log);
-  worker->zero(&center_re_s, ldexp(round(ldexp(c_re, step_log)), -step_log));
-  worker->zero(&center_im_s, ldexp(round(ldexp(c_im, step_log)), -step_log));
+  //worker->zero(&center_re_s, ldexp(round(ldexp(c_re, step_log)), -step_log));
+  worker->zero(&center_re_s); //worker->swap()
+  worker->assign(&center_re_s, c_re);
+  worker->lshift(&center_re_s, step_log);
+  worker->round(&center_re_s);
+  worker->lshift(&center_re_s, -step_log);
+  //worker->zero(&center_im_s, ldexp(round(ldexp(c_im, step_log)), -step_log));
+  worker->zero(&center_im_s); //worker->swap()
+  worker->assign(&center_im_s, c_im);
+  worker->lshift(&center_im_s, step_log);
+  worker->round(&center_im_s);
+  worker->lshift(&center_im_s, -step_log);
   updateCachedDepth();
 }
 
@@ -1101,7 +1203,8 @@ void LaguerreModel::Position::scale(int inlog, int center_x, int center_y)
     return;
   if (inlog>0)
   {
-    if (step_log+inlog>MAX_ZOOM_IN_DOUBLE)
+    int max_zoom=qRound(2-log(worker->eps2())/log(4));
+    if (step_log+inlog>max_zoom)//MAX_ZOOM_IN_DOUBLE)
       return;
     double old_step_size=step_size__;
     step_log+=inlog;
@@ -1151,19 +1254,21 @@ void LaguerreModel::Position::updateCachedDepth()
 {
   //number_any d_re_n(MandelMath::number_store::DbgType::typeEmpty, &d_re_s);
   MandelMath::number_store d_re_s;
-  worker->init(&d_re_s);
+  MandelMath::number_place d_re_p;
+  worker->init_(&d_re_s, &d_re_p);
   worker->assign(&d_re_s, &center_re_s);
   worker->lshift(&d_re_s, step_log-15);
-  worker->frac_pos(&d_re_s);
+  worker->mod1(&d_re_s);
   worker->lshift(&d_re_s, 15);
   cached_center_re_mod=worker->toRound(&d_re_s);
   worker->cleanup(&d_re_s);
 
   MandelMath::number_store d_im_s;
-  worker->init(&d_im_s);
+  MandelMath::number_place d_im_p;
+  worker->init_(&d_im_s, &d_im_p);
   worker->assign(&d_im_s, &center_im_s);
   worker->lshift(&d_im_s, step_log-15);
-  worker->frac_pos(&d_im_s);
+  worker->mod1(&d_im_s);
   worker->lshift(&d_im_s, 15);
   cached_center_im_mod=worker->toRound(&d_im_s);
   worker->cleanup(&d_im_s);
