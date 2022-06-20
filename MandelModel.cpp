@@ -7,9 +7,9 @@
 #include "MandelEvaluator.hpp"
 
 MandelModel::MandelModel(): QObject(),
-  shareableViewInfoAllocator(nullptr), currentWorker(nullptr),
+  shareableViewInfoAllocator(nullptr), shareableVIAuser(nullptr), currentWorker(nullptr),
   storeAllocator(nullptr), storeWorker(nullptr), pointStore_(nullptr),
-  wtiPointAllocator(nullptr), wtiPoint(nullptr),
+  wtiPoint(nullptr),
   position_(nullptr), orbit_(nullptr)
 {
   unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
@@ -97,7 +97,7 @@ MandelModel::~MandelModel()
   }
   delete position_;
   delete wtiPoint;
-  delete wtiPointAllocator;
+  delete shareableVIAuser;
   delete shareableViewInfoAllocator;
 
   //storeWorker->getAllocator()->dealloc_array(imageWidth*imageHeight);
@@ -181,11 +181,16 @@ QString MandelModel::getTextInfoGen()
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
-  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-  MandelPoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+  //MandelPoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  wtiPoint->store=&pointStore_[orbit_x+imageWidth*orbit_y];
+  int wtiIndexFirst, wtiIndexLast;
+  wtiPoint->self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
+  currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*MandelPoint::LEN, MandelPoint::LEN);
+  MandelPoint *data=wtiPoint;
 
   QString state;
-  switch (data_.store->state)
+  switch (data->store->state)
   {
     case MandelPointStore::State::stUnknown:
       state="Unk"; break;
@@ -207,8 +212,8 @@ QString MandelModel::getTextInfoGen()
       state="Max"; break;
   }
 
-  return state+" iter="+QString::number(data_.store->iter)+" near="+QString::number(data_.store->near0iter)+
-      " fc="+mandDoubleToString(storeWorker->toDouble(data_.fc_c.re))+mandDoubleToString(storeWorker->toDouble(data_.fc_c.im))+"i";
+  return state+" iter="+QString::number(data->store->iter)+" near="+QString::number(data->store->near0iter)+
+      " fc="+mandDoubleToString(storeWorker->toDouble(data->fc_c.re))+mandDoubleToString(storeWorker->toDouble(data->fc_c.im))+"i";
 }
 
 QString MandelModel::getTextInfoSpec()
@@ -222,18 +227,23 @@ QString MandelModel::getTextInfoSpec()
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
-  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-  MandelPoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+  //MandelPoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  wtiPoint->store=&pointStore_[orbit_x+imageWidth*orbit_y];
+  int wtiIndexFirst, wtiIndexLast;
+  wtiPoint->self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
+  currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*MandelPoint::LEN, MandelPoint::LEN);
+  MandelPoint *data=wtiPoint;
 
-  switch (data_.store->state)
+  switch (data->store->state)
   {
     case MandelPointStore::State::stUnknown:
       return " ";
       break;
     case MandelPointStore::State::stOutside:
-      return QString("ext=")+QString::number(data_.store->exterior_hits); break;
+      return QString("ext=")+QString::number(data->store->exterior_hits); break;
     case MandelPointStore::State::stOutAngle:
-      return QString("ext=")+QString::number(data_.store->exterior_hits); break;
+      return QString("ext=")+QString::number(data->store->exterior_hits); break;
     case MandelPointStore::State::stBoundary:
       return " ";
     case MandelPointStore::State::stDiverge:
@@ -241,9 +251,9 @@ QString MandelModel::getTextInfoSpec()
     case MandelPointStore::State::stMisiur:
       return " ";
     case MandelPointStore::State::stPeriod2:
-      return QString("per=")+QString::number(data_.store->period)+" int="+QString::number(data_.store->interior)   +" mult="+QString::number(orbit_->evaluator.bulb.dbg_guessmult); break;
+      return QString("per=")+QString::number(data->store->period)+" int="+QString::number(data->store->interior)   +" mult="+QString::number(orbit_->evaluator.bulb.dbg_guessmult); break;
     case MandelPointStore::State::stPeriod3:
-      return QString("per=")+QString::number(data_.store->period)+" int="+QString::number(data_.store->interior)   +" mult="+QString::number(orbit_->evaluator.bulb.dbg_guessmult); break;
+      return QString("per=")+QString::number(data->store->period)+" int="+QString::number(data->store->interior)   +" mult="+QString::number(orbit_->evaluator.bulb.dbg_guessmult); break;
     case MandelPointStore::State::stMaxIter:
       return " "; break;
   }
@@ -254,7 +264,7 @@ ShareableViewInfo MandelModel::getViewInfo()
 {
   ShareableViewInfo result(shareableViewInfoAllocator);
   //result.worker=orbit.worker;
-  result.period=orbit_->pointData.store->near0iter;//evaluator.currentData.lookper_lastGuess;//orbit.pointData.period;
+  result.period=orbit_->evaluator.currentData.store->near0iter;//evaluator.currentData.lookper_lastGuess;//orbit.pointData.period;
   if (result.period<1)
     result.period=1;
   result.scale=position_->step_size__;
@@ -281,6 +291,9 @@ void MandelModel::transformStore(MandelMath::worker_multi *old_worker, MandelMat
     dbgPoint();
     return;
   };
+  int indexOfWtiPoint, wtiIndexLast;
+  wtiPoint->self_allocator._getRange(indexOfWtiPoint, wtiIndexLast);
+  assert(wtiIndexLast-indexOfWtiPoint==MandelPoint::LEN);
   //(oldx-width/2)*old_step+old_cre = (newx-width/2)*new_step+new_cre
   //oldx = (width/2) + (newx-width/2+(new_cre-old_cre)/new_step)*new_step/old_step
   int step_scale_n_shift, step_scale_d_shift, step_scale_d_mask;
@@ -350,9 +363,12 @@ void MandelModel::transformStore(MandelMath::worker_multi *old_worker, MandelMat
         {
           new_worker->assign(c.re, position_->center.re);
           new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
-          MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-          MandelPoint pt(&new_store[newy*new_width+newx], &allo);
-          pt.zero(/*new_sworker, (newy*new_width+newx)*MandelPoint::LEN,*/ &c);
+          //MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+          //MandelPoint pt(&new_store[newy*new_width+newx], &allo);
+          //pt.zero(&c);
+          wtiPoint->store=&new_store[newy*new_width+newx];
+          wtiPoint->zero(&c);
+          new_sworker->assign_block((newy*new_width+newx)*MandelPoint::LEN, currentWorker, indexOfWtiPoint, MandelPoint::LEN);
         }
       };
     }
@@ -384,9 +400,12 @@ void MandelModel::transformStore(MandelMath::worker_multi *old_worker, MandelMat
         {
           new_worker->assign(c.re, position_->center.re);
           new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
-          MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-          MandelPoint pt(&new_store[newy*new_width+newx], &allo);
-          pt.zero(/*new_worker, (newy*new_width+newx)*MandelPoint::LEN,*/ &c);
+          //MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+          //MandelPoint pt(&new_store[newy*new_width+newx], &allo);
+          //pt.zero(&c);
+          wtiPoint->store=&new_store[newy*new_width+newx];
+          wtiPoint->zero(&c);
+          new_sworker->assign_block((newy*new_width+newx)*MandelPoint::LEN, currentWorker, indexOfWtiPoint, MandelPoint::LEN);
         }
       }
     }
@@ -586,9 +605,10 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   else if (orbit_->currentWorker->ntype()!=currentWorker->ntype())
     dbgPoint();
 
-  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (y*imageWidth+x)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-  MandelPoint data_(&pointStore_[y*imageWidth+x], &allo);
-  switch (data_.store->state)
+  //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (y*imageWidth+x)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+  //MandelPoint data_(&pointStore_[y*imageWidth+x], &allo);
+  MandelPoint *data=&orbit_->evaluator.currentData;
+  switch (data->store->state)
   {
     case MandelPointStore::State::stOutside:
     case MandelPointStore::State::stOutAngle:
@@ -596,10 +616,10 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
       int exterior;
       painter.setBrush(Qt::BrushStyle::NoBrush);
       painter.setPen(QColor(0xff, 0xff, 0));
-      exterior=qRound(data_.store->exterior_hits/position_->step_size__);
+      exterior=qRound(data->store->exterior_hits/position_->step_size__);
       painter.drawEllipse(x-exterior, y-exterior, 2*exterior, 2*exterior);
       painter.setPen(QColor(0xc0, 0xc0, 0));
-      exterior=qRound(data_.store->exterior_avoids/position_->step_size__);
+      exterior=qRound(data->store->exterior_avoids/position_->step_size__);
       painter.drawEllipse(x-exterior, y-exterior, 2*exterior, 2*exterior);
     } break;
     case MandelPointStore::State::stPeriod2:
@@ -608,10 +628,10 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
       int interior;
       painter.setBrush(Qt::BrushStyle::NoBrush);
       painter.setPen(QColor(0, 0xff, 0xff));
-      interior=qRound(data_.store->interior/position_->step_size__);
+      interior=qRound(data->store->interior/position_->step_size__);
       painter.drawEllipse(x-interior, y-interior, 2*interior, 2*interior);
       painter.setPen(QColor(0, 0xc0, 0xc0));
-      interior=qRound(data_.store->interior/4/position_->step_size__);
+      interior=qRound(data->store->interior/4/position_->step_size__);
       painter.drawEllipse(x-interior, y-interior, 2*interior, 2*interior);
     } break;
     default: ;
@@ -620,38 +640,37 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   position_->pixelYtoIM(imageHeight/2-y, orbit_->evaluator.currentParams.c.im);
   orbit_->evaluator.currentParams.epoch=epoch;
   orbit_->evaluator.currentParams.pixelIndex=0;
-  orbit_->pointData.zero(&orbit_->evaluator.currentParams.c);
+  orbit_->evaluator.currentData.zero(&orbit_->evaluator.currentParams.c);
   orbit_->evaluator.currentParams.breakOnNewNearest=true;
   orbit_->evaluator.currentParams.maxiter_=1<<MAX_EFFORT;
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0xff, 0xff, 0xff)); //paint path
-  while ((orbit_->pointData.store->state==MandelPointStore::State::stUnknown) &&
-         (orbit_->pointData.store->iter<(1<<MAX_EFFORT)))
+  while ((orbit_->evaluator.currentData.store->state==MandelPointStore::State::stUnknown) &&
+         (orbit_->evaluator.currentData.store->iter<(1<<MAX_EFFORT)))
   {
     int line_sx, line_sy, line_ex, line_ey;
-    reimToPixel(&line_sx, &line_sy, &orbit_->pointData.f, &orbit_->tmp);
+    reimToPixel(&line_sx, &line_sy, &orbit_->evaluator.currentData.f, &orbit_->tmp);
 
-    if ((data_.store->state==MandelPointStore::State::stPeriod2 || data_.store->state==MandelPointStore::State::stPeriod3) &&
-        orbit_->pointData.store->iter<data_.store->period)
+    if ((data->store->state==MandelPointStore::State::stPeriod2 || data->store->state==MandelPointStore::State::stPeriod3) &&
+        orbit_->evaluator.currentData.store->iter<data->store->period)
     { //paint first period fully
-      orbit_->evaluator.currentParams.maxiter_=orbit_->pointData.store->iter+1;
+      orbit_->evaluator.currentParams.maxiter_=orbit_->evaluator.currentData.store->iter+1;
     }
     else if (orbit_->evaluator.currentData.store->lookper_lastGuess==0)
       orbit_->evaluator.currentParams.maxiter_=1<<MAX_EFFORT; //dont't know->run fully
     else //stop at multiples of lookper
-      orbit_->evaluator.currentParams.maxiter_=(orbit_->pointData.store->iter/orbit_->evaluator.currentData.store->lookper_lastGuess+1)*orbit_->evaluator.currentData.store->lookper_lastGuess;
-    orbit_->evaluator.startCompute(&orbit_->pointData, +1);
-    orbit_->pointData.assign(orbit_->evaluator.currentData);
+      orbit_->evaluator.currentParams.maxiter_=(orbit_->evaluator.currentData.store->iter/orbit_->evaluator.currentData.store->lookper_lastGuess+1)*orbit_->evaluator.currentData.store->lookper_lastGuess;
+    orbit_->evaluator.startCompute(+1);
 
-    reimToPixel(&line_ex, &line_ey, &orbit_->pointData.f, &orbit_->tmp);
+    reimToPixel(&line_ex, &line_ey, &orbit_->evaluator.currentData.f, &orbit_->tmp);
     painter.drawLine(line_sx, line_sy, line_ex, line_ey);
   }
-  if ((orbit_->pointData.store->state==MandelPointStore::State::stPeriod2) ||
-      (orbit_->pointData.store->state==MandelPointStore::State::stPeriod3))
+  if ((orbit_->evaluator.currentData.store->state==MandelPointStore::State::stPeriod2) ||
+      (orbit_->evaluator.currentData.store->state==MandelPointStore::State::stPeriod3))
   {
     int circ_x, circ_y;
     painter.setPen(QColor(0, 0xff, 0xff)); //paint root
-    reimToPixel(&circ_x, &circ_y, &orbit_->pointData.root, &orbit_->tmp);
+    reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.currentData.root, &orbit_->tmp);
     if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
     {
       painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -670,7 +689,7 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     orbit_->bulb.foundMult=0;
     orbit_->bulb.is_card=false;
 
-    orbit_->bulb.valid=orbit_->evaluator.bulb.findBulbBase(orbit_->pointData.store->period,
+    orbit_->bulb.valid=orbit_->evaluator.bulb.findBulbBase(orbit_->evaluator.currentData.store->period,
         &orbit_->evaluator.currentParams.c, &orbit_->bulb.cb, &orbit_->bulb.rb,
         &orbit_->bulb.xc, &orbit_->bulb.baseZC, &orbit_->bulb.baseCC,
         &orbit_->bulb.is_card, &orbit_->bulb.foundMult);
@@ -796,6 +815,8 @@ int MandelModel::writeToImage(ShareableImageWrapper image)
   if (image.image->isNull() || (image.image->width()!=imageWidth) || (image.image->height()!=imageHeight))
     return -1;
   timerWriteToImage.start();
+  int indexOfWtiPoint, _discard;
+  wtiPoint->self_allocator._getRange(indexOfWtiPoint, _discard);
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
@@ -804,9 +825,7 @@ int MandelModel::writeToImage(ShareableImageWrapper image)
       //MandelPoint data_(&pointStore_[y*imageWidth+x], &allo);
       wtiPoint->store=&pointStore_[y*imageWidth+x];
       {
-        int first, last;
-        wtiPointAllocator->_getRange(first, last);
-        currentWorker->assign_block(first, storeWorker, (y*imageWidth+x)*MandelPoint::LEN, MandelPoint::LEN);
+        currentWorker->assign_block(indexOfWtiPoint, storeWorker, (y*imageWidth+x)*MandelPoint::LEN, MandelPoint::LEN);
       }
       //if ((x==222) && (y==170))
         //data->state=MandelPoint::State::stOutside;
@@ -1363,6 +1382,8 @@ int MandelModel::writeToImage(ShareableImageWrapper image)
 void MandelModel::giveWork(MandelEvaluator *evaluator)
 {
   int retryEffortFrom=0;
+  int intoEvaluator, _discard;
+  evaluator->currentData.self_allocator._getRange(intoEvaluator, _discard);
   while (retryEffortFrom>=0)
   {
     retryEffortFrom=-1;
@@ -1372,14 +1393,15 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
       int pointIndex=(lastGivenPointIndex_+pi)%(imageWidth*imageHeight);
       //if ((lastGivenPointIndex_!=0) && (pointIndex==0))
         //dbgPoint();
-      MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), pointIndex*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-      MandelPoint pointData_(&pointStore_[pointIndex], &allo);
-      bool needsEval=(pointData_.store->state==MandelPointStore::State::stUnknown);
+      //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), pointIndex*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+      //MandelPoint pointData_(&pointStore_[pointIndex], &allo);
+      MandelPointStore *storeAtIndex=&pointStore_[pointIndex];
+      bool needsEval=(storeAtIndex->state==MandelPointStore::State::stUnknown);
       if (!needsEval)
         needsEval=(_selectedPaintStyle==paintStyleFC) &&
-                  (!pointData_.store->has_fc_r) &&
-                  ((pointData_.store->state==MandelPointStore::State::stPeriod2) ||
-                   (pointData_.store->state==MandelPointStore::State::stPeriod3));
+                  (!storeAtIndex->has_fc_r) &&
+                  ((storeAtIndex->state==MandelPointStore::State::stPeriod2) ||
+                   (storeAtIndex->state==MandelPointStore::State::stPeriod3));
       if (needsEval)
       {
         bool found=false;
@@ -1404,24 +1426,26 @@ void MandelModel::giveWork(MandelEvaluator *evaluator)
           if (effort>=MAX_EFFORT)
             effort=MAX_EFFORT;
           evaluator->currentParams.maxiter_=1<<effort;
-          if (pointData_.store->iter>=evaluator->currentParams.maxiter_)
+          if (storeAtIndex->iter>=evaluator->currentParams.maxiter_)
           {
             if (effort>=MAX_EFFORT)
-              pointData_.store->state=MandelPointStore::State::stMaxIter;
+              storeAtIndex->state=MandelPointStore::State::stMaxIter;
             else if (retryEffortFrom<0)
               retryEffortFrom=pointIndex;
           }
           else
           {
-            if (evaluator->currentWorker->ntype()!=position_->worker->ntype())
-              dbgPoint();
+            //if (evaluator->currentWorker->ntype()!=position_->worker->ntype())
+              //dbgPoint();
             //evaluator->switchType(position.worker);
             position_->pixelXtoRE(pointIndex%imageWidth - imageWidth/2, evaluator->currentParams.c.re);
             position_->pixelYtoIM(imageHeight/2-pointIndex/imageWidth, evaluator->currentParams.c.im);
             evaluator->currentParams.epoch=epoch;
             evaluator->currentParams.pixelIndex=pointIndex;
             evaluator->currentParams.want_fc_r=(_selectedPaintStyle==paintStyleFC);
-            if (evaluator->startCompute(&pointData_, quickrun>=100?-1:0))
+            evaluator->currentDataStore.assign(storeAtIndex);
+            evaluator->currentWorker->assign_block(intoEvaluator, storeWorker, pointIndex*MandelPoint::LEN, MandelPoint::LEN);
+            if (evaluator->startCompute(quickrun>=100?-1:0))
             //if (worker->startCompute(pointData, true))
             {
               _threadsWorking++;
@@ -1453,20 +1477,27 @@ void MandelModel::donePixel1(MandelEvaluator *me)
 {
   if ((me->currentParams.epoch==epoch) && (me->currentParams.pixelIndex>=0) && (me->currentParams.pixelIndex<imageWidth*imageHeight))
   {
-    MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), me->currentParams.pixelIndex*MandelPoint::LEN, MandelPoint::LEN, nullptr);
-    MandelPoint point_(&pointStore_[me->currentParams.pixelIndex], &allo);
+    //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), me->currentParams.pixelIndex*MandelPoint::LEN, MandelPoint::LEN, nullptr);
+    //MandelPoint point_(&pointStore_[me->currentParams.pixelIndex], &allo);
     /* it's OK now as fc_r is computed later
     if (point->state!=MandelPoint::State::stUnknown)
       qDebug()<<"Finished pixel finished again";
     else*/
     {
+      MandelPointStore *dstStore=&pointStore_[me->currentParams.pixelIndex];
       if (position_->worker==nullptr)
         dbgPoint();
       else
-        point_.assign(me->currentData);
-      if ((point_.store->state==MandelPointStore::State::stUnknown) &&
-          (point_.store->iter>=(1<<MAX_EFFORT)))
-        point_.store->state=MandelPointStore::State::stMaxIter;
+      {
+        //point_.assign(me->currentData);
+        int first, last;
+        me->currentData.self_allocator._getRange(first, last);
+        storeWorker->assign_block(me->currentParams.pixelIndex*MandelPoint::LEN, me->currentWorker, first, last-first);
+        dstStore->assign(me->currentData.store);
+      }
+      if ((dstStore->state==MandelPointStore::State::stUnknown) &&
+          (dstStore->iter>=(1<<MAX_EFFORT)))
+        dstStore->state=MandelPointStore::State::stMaxIter;
     }
   }
   else if (me->currentParams.epoch!=epoch)
@@ -1538,13 +1569,13 @@ void MandelModel::selectedPrecisionChanged()
       pointCount=imageWidth*imageHeight;
     if (threadCount!=0)
       dbgPoint();
-    threadCount=1;//QThread::idealThreadCount()-1;
+    threadCount=QThread::idealThreadCount()-1;
     if (threadCount<1)
       threadCount=1;
     switch (_selectedPrecision)
     {
       case precisionDouble:
-        newWorker=new MandelMath::worker_multi_double(MandelModel::LEN+threadCount*MandelEvaluator::LEN);
+        newWorker=new MandelMath::worker_multi_double(MandelModel::LEN);
         newStoreWorker=new MandelMath::worker_multi_double(pointCount*MandelPoint::LEN);
         break;
 #if !ONLY_DOUBLE_WORKER
@@ -1567,18 +1598,18 @@ void MandelModel::selectedPrecisionChanged()
 
   {
     MandelMath::worker_multi::Allocator *newshareableViewInfoAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), ShareableViewInfo::LEN);
-    MandelMath::worker_multi::Allocator *newWtiPointAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), MandelPoint::LEN);
-    MandelPoint *newWtiPoint=new MandelPoint(nullptr, newWtiPointAllocator);
+    MandelMath::worker_multi::Allocator *newshareableVIAuser=new MandelMath::worker_multi::Allocator(newshareableViewInfoAllocator, ShareableViewInfo::LEN);
+    MandelPoint *newWtiPoint=new MandelPoint(nullptr, newWorker->getAllocator(), nullptr);
     Position *newPosition=new Position(newWorker->getAllocator());
     Orbit *newOrbit=new Orbit(newWorker->getAllocator());
     newPosition->assign(position_);
     delete orbit_;
     delete position_;
     delete wtiPoint;
-    delete wtiPointAllocator;
+    delete shareableVIAuser;
     delete shareableViewInfoAllocator;
     shareableViewInfoAllocator=newshareableViewInfoAllocator;
-    wtiPointAllocator=newWtiPointAllocator;
+    shareableVIAuser=newshareableVIAuser;
     wtiPoint=newWtiPoint;
     position_=newPosition;
     orbit_=newOrbit;
@@ -1587,7 +1618,7 @@ void MandelModel::selectedPrecisionChanged()
   threads=new MandelEvaluator *[threadCount];
   for (int t=0; t<threadCount; t++)
   {
-    threads[t]=new MandelEvaluator(newWorker->getAllocator(), nullptr);
+    threads[t]=new MandelEvaluator(newWorker->ntype());
     //threads[t].setHint(t);
     QObject::connect(threads[t], &MandelEvaluator::doneCompute,
                      this, &MandelModel::donePixel,
@@ -1747,8 +1778,8 @@ void MandelModel::Position::pixelYtoIM(int y, MandelMath::number_pointer result)
 
 
 MandelModel::Orbit::Orbit(MandelMath::worker_multi::Allocator *allocator): currentWorker(allocator->worker),
-  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator, nullptr),
-  pointAllocator(allocator, MandelPoint::LEN), pointDataStore(), pointData(&pointDataStore, &pointAllocator),
+  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype()),
+  //pointAllocator(allocator, MandelPoint::LEN), //pointDataStore(), pointData(&pointDataStore, &pointAllocator),
   lagu_c(allocator), lagu_r(allocator), tmp(allocator), bulb(allocator)
 {
 }

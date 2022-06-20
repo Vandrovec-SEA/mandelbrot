@@ -29,8 +29,9 @@ void LaguerrePointStore::assign(const LaguerrePointStore *src)
 }
 
 
-LaguerrePoint::LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator):
-  store(store), f(allocator), fz_r(allocator)
+LaguerrePoint::LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+  self_allocator(allocator, LEN),
+  store(store), f(&self_allocator), fz_r(&self_allocator)
 {
 }
 
@@ -150,14 +151,15 @@ void MandelPointStore::assign(const MandelPointStore *src)
   interior=src->interior;
 }
 
-MandelPoint::MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator):
-  store(store), f(allocator), fc_c(allocator), fz_r(allocator), fz_c_mag(allocator),
-  lookper_startf(allocator), lookper_nearr_dist(allocator), lookper_totalFzmag(allocator),
-  near0f(allocator), root(allocator)
+MandelPoint::MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+  self_allocator(allocator, LEN),
+  store(store), f(&self_allocator), fc_c(&self_allocator), fz_r(&self_allocator), fz_c_mag(&self_allocator),
+  lookper_startf(&self_allocator), lookper_nearr_dist(&self_allocator), lookper_totalFzmag(&self_allocator),
+  near0f(&self_allocator), root(&self_allocator)
 {
   //reset();
   //should be overwritten before read:
-  assert(allocator->checkFill());
+  assert(self_allocator.checkFill());
 }
 
 void MandelPoint::assign(const MandelPoint &src)
@@ -1385,19 +1387,19 @@ bool MandelLoopEvaluator::eval2zzc(int period, const MandelMath::complex *c, con
 
 
 
-MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *): QThread(nullptr),
-  self_allocator(allocator, LEN),
-  currentWorker(allocator->worker),
-  params_allocator(&self_allocator, ComputeParams::LEN), currentParams(&params_allocator),
-  currentDataAllocator(&self_allocator, MandelPoint::LEN), currentData(&currentDataStore, &currentDataAllocator),
-  /*newtres_allocator(&self_allocator, NewtRes::LEN),*/ newtres_(&self_allocator, nullptr),
-  /*eval_allocator(&self_allocator, Eval::LEN),*/ eval(&self_allocator, nullptr),
-  /*newt_allocator(&self_allocator, Newt::LEN),*/ newt(&self_allocator, nullptr),
-  /*interior_allocator(&self_allocator, InteriorInfo::LEN),*/ interior(&self_allocator, nullptr),
-  /*bulb_allocator(&self_allocator, Bulb::LEN),*/ bulb(&self_allocator, nullptr)
+MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype): QThread(nullptr),
+  currentWorker(MandelMath::worker_multi::create(ntype, LEN)),
+  params_allocator(currentWorker->getAllocator(), ComputeParams::LEN), currentParams(&params_allocator),
+  /*currentDataAllocator(currentWorker->getAllocator(), MandelPoint::LEN),*/ currentData(&currentDataStore, currentWorker->getAllocator(), nullptr),
+  tmpLaguerrePoint(nullptr, currentWorker->getAllocator(), nullptr),
+  /*newtres_allocator(&self_allocator, NewtRes::LEN),*/ newtres_(currentWorker->getAllocator(), nullptr),
+  /*eval_allocator(&self_allocator, Eval::LEN),*/ eval(currentWorker->getAllocator(), nullptr),
+  /*newt_allocator(&self_allocator, Newt::LEN),*/ newt(currentWorker->getAllocator(), nullptr),
+  /*interior_allocator(&self_allocator, InteriorInfo::LEN),*/ interior(currentWorker->getAllocator(), nullptr),
+  /*bulb_allocator(&self_allocator, Bulb::LEN),*/ bulb(currentWorker->getAllocator(), nullptr)
 {
   QThread::start(QThread::Priority::LowestPriority);
-  assert(self_allocator.checkFill());
+  assert(currentWorker->getAllocator()->checkFill());
   wantStop=false;
   pointsComputed=0;
   timeOuterTotal=0;
@@ -1690,16 +1692,10 @@ void MandelEvaluator::simple_multi(MandelMath::multiprec *cr, MandelMath::multip
   currentWorker=worker;
 }*/
 
-bool MandelEvaluator::startCompute(const MandelPoint *data, int quick_route)
+bool MandelEvaluator::startCompute(/*const MandelPoint *data,*/ int quick_route)
 {
   //currentParams=params;
-  /*if (currentWorker->ntype()!=data->f.worker->ntype())
-  {
-    dbgPoint();
-    currentData.state=MandelPoint::State::stMaxIter;
-    return false;
-  }*/
-  currentData.assign(*data);
+  //currentData.assign(*data);
   if ((quick_route==1) ||
       ((quick_route==0) && (currentParams.maxiter_-currentData.store->iter<=1000)))
   {

@@ -110,12 +110,14 @@ public:
   worker_multi(Type ntype, int capacity): _ntype(ntype), allocator(this, capacity, nullptr), capacity(capacity) { }
   virtual ~worker_multi() { capacity=0; }
   virtual Type ntype() { return this->_ntype; }
+  static worker_multi *create(Type ntype, int capacity);
   Allocator *getAllocator() { return &allocator; }
   /*virtual number_pointer alloc()=0;
   virtual void alloc_array(int count)=0;
   virtual void dealloc(number_pointer store)=0;
   virtual void dealloc_array(int count)=0;*/
   virtual void assign_block(int dst, worker_multi *src_worker, int src, int len)=0; //for now, assert(this.ntype==src.ntype)
+    //or assign_block(int dst, allocator *src) + assign_block(allocator *dst, int src) + assign_block(int dst, int src, int len)
 
   //virtual void init(number_store *store, void *placement, double val=0)=0;
   virtual void zero(const number_pointer store, double val=0)=0;

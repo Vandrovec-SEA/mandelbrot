@@ -21,8 +21,9 @@ struct LaguerrePointStore
 struct LaguerrePoint
 {
   static constexpr size_t LEN=4;
+  MandelMath::worker_multi::Allocator self_allocator;
   LaguerrePointStore *store;
-  LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator);
+  LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
   MandelMath::complex f;
   MandelMath::complex fz_r;
   LaguerrePoint &operator =(LaguerrePoint &src) = delete;
@@ -52,8 +53,9 @@ struct MandelPointStore
 struct MandelPoint
 {
   static constexpr size_t LEN=15;
+  MandelMath::worker_multi::Allocator self_allocator;
   MandelPointStore *store;
-  MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator);
+  MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
   MandelMath::complex f;
   MandelMath::complex fc_c; //fc_c, or fz_r if stPeriod2 or stPeriod3
   MandelMath::complex fz_r;
@@ -180,12 +182,13 @@ class MandelEvaluator: public QThread
 {
   Q_OBJECT
 protected:
-  MandelMath::worker_multi::Allocator self_allocator;
+  //MandelMath::worker_multi::Allocator self_allocator;
 public:
   constexpr static double LARGE_FLOAT2=1e60;
   constexpr static double MAGIC_MIN_SHRINK=1.5;
   constexpr static int MAX_PERIOD=8000;
-  MandelEvaluator(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+  MandelMath::worker_multi *currentWorker;
+  MandelEvaluator(MandelMath::worker_multi::Type ntype);
   ~MandelEvaluator();
 #if NUMBER_DOUBLE_EXISTS
   static void simple_double(double cr, double ci, MandelPoint &data, int maxiter);
@@ -194,7 +197,6 @@ public:
   static void simple_multi(MandelMath::multiprec *cr, MandelMath::multiprec *ci, MandelPoint &data, int maxiter);
 
   //MandelMath::number_worker::Type currentType;
-  MandelMath::worker_multi *currentWorker;
   //MandelMath::worker_multi::Allocator *currentAllocator;
   //void switchType(MandelMath::number_worker *worker);
   bool wantStop;
@@ -219,11 +221,12 @@ public:
     bool want_fc_r;
     ComputeParams(MandelMath::worker_multi::Allocator *allocator);
   } currentParams;
-  MandelMath::worker_multi::Allocator currentDataAllocator;
+  //MandelMath::worker_multi::Allocator currentDataAllocator;
   MandelPointStore currentDataStore;
   MandelPoint currentData;
+  LaguerrePoint tmpLaguerrePoint;
 
-  bool startCompute(const MandelPoint *data, int quick_route); //qr: -1..never 0..auto 1..always
+  bool startCompute(/*const MandelPoint *data,*/ int quick_route); //works directly on currentData //qr: -1..never 0..auto 1..always
   void startNewton(int period, const MandelMath::complex *c /*, currentData.f const *root, */);
   int newton(int period, const MandelMath::complex *c, MandelMath::complex *r, const bool fastHoming, const int suggestedMultiplicity);
   struct NewtRes
@@ -325,7 +328,7 @@ public:
     bool findBulbBase(int period2, const MandelMath::complex *c, MandelMath::complex *cb, MandelMath::complex *rb, MandelMath::complex *xc, MandelMath::complex *baseZC, MandelMath::complex *baseCC, bool *is_card, int *foundMult);
     static constexpr int LEN=MandelLoopEvaluator::LEN+34+LaguerreStep::LEN;
   } bulb;
-  static constexpr size_t LEN=ComputeParams::LEN+MandelPoint::LEN+NewtRes::LEN+Eval::LEN+Newt::LEN+InteriorInfo::LEN+Bulb::LEN;
+  static constexpr size_t LEN=ComputeParams::LEN+MandelPoint::LEN+LaguerrePoint::LEN+NewtRes::LEN+Eval::LEN+Newt::LEN+InteriorInfo::LEN+Bulb::LEN;
 protected:
 
   protected:

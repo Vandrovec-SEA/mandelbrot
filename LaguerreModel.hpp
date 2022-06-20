@@ -101,7 +101,6 @@ protected:
   MandelEvaluator **threads;
   QElapsedTimer timerWriteToImage;
 
-  MandelMath::worker_multi::Allocator *wtiPointAllocator;
   LaguerrePoint *wtiPoint;
   struct Position
   {

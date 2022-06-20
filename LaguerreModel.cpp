@@ -9,7 +9,7 @@
 LaguerreModel::LaguerreModel(): QObject(),
   paramsAllocator(nullptr), params_(nullptr), currentWorker(nullptr),
   storeAllocator(nullptr), storeWorker(nullptr), pointStore_(nullptr),
-  wtiPointAllocator(nullptr), wtiPoint(nullptr),
+  wtiPoint(nullptr),
   position_(nullptr), orbit_(nullptr)
 {
   unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
@@ -60,7 +60,6 @@ LaguerreModel::~LaguerreModel()
 
   delete position_;
   delete wtiPoint;
-  delete wtiPointAllocator;
   delete params_;
   delete paramsAllocator;
 
@@ -145,11 +144,16 @@ QString LaguerreModel::getTextInfoGen()
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
-  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
-  LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+  //LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  wtiPoint->store=&pointStore_[orbit_x+imageWidth*orbit_y];
+  int wtiIndexFirst, wtiIndexLast;
+  wtiPoint->self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
+  currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+  LaguerrePoint *data=wtiPoint;
 
   QString state;
-  switch (data_.store->state)
+  switch (data->store->state)
   {
     case LaguerrePointStore::State::stUnknown:
       state="Unk"; break;
@@ -159,7 +163,7 @@ QString LaguerreModel::getTextInfoGen()
       state="Err"; break;
   }
 
-  return "Per="+QString::number(params_->period)+" "+state+" iter="+QString::number(data_.store->iter)+
+  return "Per="+QString::number(params_->period)+" "+state+" iter="+QString::number(data->store->iter)+
         " mu="+QString::number(orbit_->first_mu_re_, 'f', 3)+","+QString::number(orbit_->first_mu_im, 'f', 3)+
         " mum="+QString::number(orbit_->first_mum_re_, 'f', 3)+","+QString::number(orbit_->first_mum_im_, 'f', 3);
 }
@@ -175,10 +179,15 @@ QString LaguerreModel::getTextInfoSpec()
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
-  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
-  LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+  //LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
+  wtiPoint->store=&pointStore_[orbit_x+imageWidth*orbit_y];
+  int wtiIndexFirst, wtiIndexLast;
+  wtiPoint->self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
+  currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+  LaguerrePoint *data=wtiPoint;
 
-  switch (data_.store->state)
+  switch (data->store->state)
   {
     case LaguerrePointStore::State::stUnknown:
       return " ";
@@ -253,6 +262,9 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
     dbgPoint();
     return;
   };
+  int indexOfWtiPoint, wtiIndexLast;
+  wtiPoint->self_allocator._getRange(indexOfWtiPoint, wtiIndexLast);
+  assert(wtiIndexLast-indexOfWtiPoint==LaguerrePoint::LEN);
   //(oldx-width/2)*old_step+old_cre = (newx-width/2)*new_step+new_cre
   //oldx = (width/2) + (newx-width/2+(new_cre-old_cre)/new_step)*new_step/old_step
   int step_scale_n_shift, step_scale_d_shift, step_scale_d_mask;
@@ -322,9 +334,12 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
         {
           new_worker->assign(c.re, position_->center.re);
           new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
-          MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
-          LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
-          pt.zero(/*new_sworker, (newy*new_width+newx)*LaguerrePoint::LEN,*/ &c);
+          //MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+          //LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
+          //pt.zero(&c);
+          wtiPoint->store=&new_store[newy*new_width+newx];
+          wtiPoint->zero(&c);
+          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, currentWorker, indexOfWtiPoint, LaguerrePoint::LEN);
         }
       };
     }
@@ -356,9 +371,12 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
         {
           new_worker->assign(c.re, position_->center.re);
           new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
-          MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
-          LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
-          pt.zero(/*new_worker, (newy*new_width+newx)*LaguerrePoint::LEN,*/ &c);
+          //MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+          //LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
+          //pt.zero(&c);
+          wtiPoint->store=&new_store[newy*new_width+newx];
+          wtiPoint->zero(&c);
+          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, currentWorker, indexOfWtiPoint, LaguerrePoint::LEN);
         }
       }
     }
@@ -777,6 +795,8 @@ int LaguerreModel::writeToImage(ShareableImageWrapper image)
   if (image.image->isNull() || (image.image->width()!=imageWidth) || (image.image->height()!=imageHeight))
     return -1;
   timerWriteToImage.start();
+  int indexOfWtiPoint, _discard;
+  wtiPoint->self_allocator._getRange(indexOfWtiPoint, _discard);
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
@@ -785,9 +805,7 @@ int LaguerreModel::writeToImage(ShareableImageWrapper image)
       //LaguerrePoint data_(&pointStore_[y*imageWidth+x], &allo);
       wtiPoint->store=&pointStore_[y*imageWidth+x];
       {
-        int first, last;
-        wtiPointAllocator->_getRange(first, last);
-        currentWorker->assign_block(first, storeWorker, (y*imageWidth+x)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+        currentWorker->assign_block(indexOfWtiPoint, storeWorker, (y*imageWidth+x)*LaguerrePoint::LEN, LaguerrePoint::LEN);
       }
       //if ((x==222) && (y==170))
         //data->state=MandelPoint::State::stOutside;
@@ -886,9 +904,10 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
       int pointIndex=(lastGivenPointIndex_+pi)%(imageWidth*imageHeight);
       //if ((lastGivenPointIndex_!=0) && (pointIndex==0))
         //dbgPoint();
-      MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), pointIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
-      LaguerrePoint pointData_(&pointStore_[pointIndex], &allo);
-      bool needsEval=(pointData_.store->state==LaguerrePointStore::State::stUnknown);
+      //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), pointIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+      //LaguerrePoint pointData_(&pointStore_[pointIndex], &allo);
+      LaguerrePointStore *storeAtIndex=&pointStore_[pointIndex];
+      bool needsEval=(storeAtIndex->state==LaguerrePointStore::State::stUnknown);
       if (needsEval)
       {
         bool found=false;
@@ -968,8 +987,8 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
 {
   if ((me->currentParams.epoch==epoch) && (me->currentParams.pixelIndex>=0) && (me->currentParams.pixelIndex<imageWidth*imageHeight))
   {
-    MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), me->currentParams.pixelIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
-    LaguerrePoint point_(&pointStore_[me->currentParams.pixelIndex], &allo);
+    //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), me->currentParams.pixelIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+    //LaguerrePoint point_(&pointStore_[me->currentParams.pixelIndex], &allo);
     /*
     if (point->state!=LaguerrePoint::State::stUnknown)
       qDebug()<<"Finished pixel finished again";
@@ -979,22 +998,29 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
         dbgPoint();
       else
       {
+        LaguerrePointStore *dstStore=&pointStore_[me->currentParams.pixelIndex];
         if (result>0)
         {
-          point_.store->state=LaguerrePointStore::State::stResolved;
+          dstStore->state=LaguerrePointStore::State::stResolved;
         }
         else
         {
           me->newtres_.cyclesNeeded=-1;
-          point_.store->state=LaguerrePointStore::State::stFail;
+          dstStore->state=LaguerrePointStore::State::stFail;
         };
         //point->assign(position.worker, me->currentData);
         //in theory, LaguerrePoint can be assigned from NewtRes; in practice, they are quite different
-        point_.f.assign(&me->currentData.f); //root
-        point_.fz_r.assign(&me->newtres_.fz_r);
-        currentWorker->add_double(point_.fz_r.re, 1);
-        point_.store->iter=me->newtres_.cyclesNeeded;
-        point_.store->firstM=me->newtres_.firstMum_re_;
+        //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), me->currentParams.pixelIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+        //LaguerrePoint point_(dstStore, &allo, nullptr); mhmm
+        me->tmpLaguerrePoint.f.assign(&me->currentData.f); //root
+        me->tmpLaguerrePoint.fz_r.assign(&me->newtres_.fz_r);
+        me->currentWorker->add_double(me->tmpLaguerrePoint.fz_r.re, 1);
+        int first, last;
+        me->tmpLaguerrePoint.self_allocator._getRange(first, last);
+        storeWorker->assign_block(me->currentParams.pixelIndex*LaguerrePoint::LEN, me->currentWorker, first, last-first);
+        dstStore->iter=me->newtres_.cyclesNeeded;
+        dstStore->naiveChoice=me->newtres_.naiveChoice;
+        dstStore->firstM=me->newtres_.firstMum_re_;
       }
     }
   }
@@ -1067,7 +1093,7 @@ void LaguerreModel::selectedPrecisionChanged()
       pointCount=imageWidth*imageHeight;
     if (threadCount!=0)
       dbgPoint();
-    threadCount=1;//QThread::idealThreadCount()-1;
+    threadCount=QThread::idealThreadCount()-1;
     if (threadCount<1)
       threadCount=1;
     switch (_selectedPrecision)
@@ -1097,8 +1123,7 @@ void LaguerreModel::selectedPrecisionChanged()
   {
     MandelMath::worker_multi::Allocator *newparamsAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), Params::LEN);
     Params *newParams=new Params(newparamsAllocator);
-    MandelMath::worker_multi::Allocator *newWtiPointAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), LaguerrePoint::LEN);
-    LaguerrePoint *newWtiPoint=new LaguerrePoint(nullptr, newWtiPointAllocator);
+    LaguerrePoint *newWtiPoint=new LaguerrePoint(nullptr, newWorker->getAllocator(), nullptr);
     Position *newPosition=new Position(newWorker->getAllocator());
     Orbit *newOrbit=new Orbit(newWorker->getAllocator());
     newParams->assign(params_);
@@ -1106,12 +1131,10 @@ void LaguerreModel::selectedPrecisionChanged()
     delete orbit_;
     delete position_;
     delete wtiPoint;
-    delete wtiPointAllocator;
     delete params_;
     delete paramsAllocator;
     paramsAllocator=newparamsAllocator;
     params_=newParams;
-    wtiPointAllocator=newWtiPointAllocator;
     wtiPoint=newWtiPoint;
     position_=newPosition;
     orbit_=newOrbit;
@@ -1120,7 +1143,7 @@ void LaguerreModel::selectedPrecisionChanged()
   threads=new MandelEvaluator *[threadCount];
   for (int t=0; t<threadCount; t++)
   {
-    threads[t]=new MandelEvaluator(newWorker->getAllocator(), nullptr);
+    threads[t]=new MandelEvaluator(newWorker->ntype());
     //threads[t].setHint(t);
     QObject::connect(threads[t], &MandelEvaluator::doneNewton,
                      this, &LaguerreModel::donePixel,
@@ -1300,8 +1323,8 @@ void LaguerreModel::Position::pixelYtoIM(int y, MandelMath::number_pointer resul
 
 
 LaguerreModel::Orbit::Orbit(MandelMath::worker_multi::Allocator *allocator): currentWorker(allocator->worker),
-  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator, nullptr),
-  pointAllocator(allocator, LaguerrePoint::LEN), pointDataStore(), pointData(&pointDataStore, &pointAllocator),
+  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype()),
+  pointAllocator(allocator, LaguerrePoint::LEN), pointDataStore(), pointData(&pointDataStore, allocator, nullptr),
   first_mu_re_(0), first_mu_im(0), first_mum_re_(0), first_mum_im_(0)
 {
 

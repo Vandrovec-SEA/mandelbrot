@@ -578,6 +578,29 @@ void number_store::assignTo_multi(number_store &other)
 */
 #endif
 
+worker_multi *worker_multi::create(Type ntype, int capacity)
+{
+  switch (ntype)
+  {
+    default://case Type::typeEmpty:
+      dbgPoint();
+      goto lolwut;
+#if NUMBER_DOUBLE_EXISTS
+    case Type::typeDouble: lolwut:
+      return new worker_multi_double(capacity);
+#endif
+#if !ONLY_DOUBLE_WORKER
+    case Type::typeFloat128:
+      return new worker_multi_float128(capacity);
+    case Type::typeDDouble:
+      return new worker_multi_ddouble(capacity);
+    case Type::typeQDouble:
+      return new worker_multi_qdouble(capacity);
+#endif
+  }
+}
+
+
 #if NUMBER_DOUBLE_EXISTS
 //worker_multi_double::worker_multi_double(worker_multi *source):
 worker_multi_double::worker_multi_double(Allocator *source):

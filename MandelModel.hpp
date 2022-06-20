@@ -33,6 +33,7 @@ public:
   Q_INVOKABLE QString getTextInfoGen();
   Q_INVOKABLE QString getTextInfoSpec();
   MandelMath::worker_multi::Allocator *shareableViewInfoAllocator;
+  MandelMath::worker_multi::Allocator *shareableVIAuser;
   ShareableViewInfo getViewInfo();
   Q_PROPERTY(ShareableViewInfo viewInfo READ getViewInfo CONSTANT)// WRITE setViewInfo NOTIFY viewInfoChanged)
 
@@ -101,7 +102,6 @@ protected:
   MandelEvaluator **threads;
   QElapsedTimer timerWriteToImage;
 
-  MandelMath::worker_multi::Allocator *wtiPointAllocator;
   MandelPoint *wtiPoint;
   struct Position
   {
@@ -128,9 +128,9 @@ protected:
     MandelMath::worker_multi *currentWorker;
     //MandelMath::worker_multi::Allocator evaluatorAllocator;
     MandelEvaluator evaluator;
-    MandelMath::worker_multi::Allocator pointAllocator;
-    MandelPointStore pointDataStore;
-    MandelPoint pointData;
+    //MandelMath::worker_multi::Allocator pointAllocator;
+    //MandelPointStore pointDataStore;
+    //-> evaluator.currentData MandelPoint pointData;
     MandelMath::complex lagu_c;
     MandelMath::complex lagu_r;
     MandelMath::number tmp;
@@ -150,7 +150,7 @@ protected:
     } bulb;
     Orbit(MandelMath::worker_multi::Allocator *allocator);
     ~Orbit();
-    constexpr static int LEN=MandelEvaluator::LEN+MandelPoint::LEN+5+Bulb::LEN;
+    constexpr static int LEN=0*MandelEvaluator::LEN+5+Bulb::LEN;
   } *orbit_;
   constexpr static int LEN=ShareableViewInfo::LEN+MandelPoint::LEN+Position::LEN+Orbit::LEN  +4;
 };
