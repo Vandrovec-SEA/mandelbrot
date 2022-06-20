@@ -24,7 +24,7 @@ public:
   //void setWorker(MandelMath::worker_multi *newWorker);
   void startNewEpoch();
   void giveWorkAll();
-  Q_INVOKABLE void writeToImage(ShareableImageWrapper img);
+  Q_INVOKABLE int writeToImage(ShareableImageWrapper img);
   void reimToPixel(int *circ_x, int *circ_y, const MandelMath::complex *c, MandelMath::number *tmp);
   Q_INVOKABLE void paintOrbit(ShareableImageWrapper image, int x, int y);
   Q_INVOKABLE QString pixelXtoRE_str(int x);
@@ -84,7 +84,7 @@ signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
 protected:
-  MandelMath::worker_multi *currentWorker_; //for Position and Orbit
+  MandelMath::worker_multi *currentWorker; //for Position and Orbit
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore
   LaguerrePointStore *pointStore_;
@@ -99,7 +99,10 @@ protected:
   //constexpr static int MAX_EFFORT=17;//18;
   int threadCount;
   MandelEvaluator **threads;
+  QElapsedTimer timerWriteToImage;
 
+  MandelMath::worker_multi::Allocator *wtiPointAllocator;
+  LaguerrePoint *wtiPoint;
   struct Position
   {
     static constexpr int LEN=2;
@@ -133,7 +136,7 @@ protected:
     ~Orbit();
     constexpr static int LEN=MandelEvaluator::LEN+LaguerrePoint::LEN;
   } *orbit_;
-  constexpr static int LEN=Params::LEN+Position::LEN+Orbit::LEN  +4;
+  constexpr static int LEN=Params::LEN+LaguerrePoint::LEN+Position::LEN+Orbit::LEN  +4;
 signals:
   void doneWork(MandelEvaluator *evaluator);
 protected slots:

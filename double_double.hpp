@@ -14,7 +14,7 @@ protected:
   inline void two_prod(double a, double b);
   inline void two_sqr(double a);
 public:
-  inline void split(double a);
+  /*inline*/ void split(double a);
   dd_real(): hi(0), lo_(0) { }
   double hi;
   double lo_; // !!can have other sign than hi!!
@@ -41,7 +41,6 @@ public:
   bool isl0() const;
   bool isl1() const;
 
-  inline void checksigns();
   //explicit operator double();
 };
 

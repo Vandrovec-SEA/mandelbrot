@@ -106,7 +106,6 @@ inline void dd_real::quick_two_sum(double a, double b)
 {
   hi = a + b;
   lo_ = b + (a - hi);
-  checksigns();
 }
 
 /* Computes fl(a-b) and err(a-b).  Assumes |a| >= |b| */
@@ -122,7 +121,6 @@ inline void dd_real::two_sum(double a, double b)
   hi = a + b;
   double bb = hi - a;
   lo_ = (a - (hi - bb)) + (b - bb);
-  checksigns();
 }
 
 /* Computes fl(a-b) and err(a-b).  */
@@ -134,7 +132,7 @@ inline double two_diff(double a, double b, double &err) {
 }
 
 /* Computes high word and lo word of a */
-inline void dd_real::split(double a)
+/*inline*/ void dd_real::split(double a)
 {
   double temp;
   if (a > _QD_SPLIT_THRESH || a < -_QD_SPLIT_THRESH) {
@@ -149,7 +147,6 @@ inline void dd_real::split(double a)
     hi = temp - (temp - a);  //temp-a=a1*2^54+a2*2^27    temp-(temp-a)=a1*2^27
     lo_ = a - hi;
   }
-  checksigns();
 }
 
 /* Computes fl(a*b) and err(a*b). */
@@ -161,7 +158,6 @@ inline void dd_real::two_prod(double a, double b)
   aa.split(a);
   bb.split(b);
   lo_ = ((aa.hi * bb.hi - hi) + aa.hi * bb.lo_ + aa.lo_ * bb.hi) + aa.lo_ * bb.lo_;
-  checksigns();
 }
 
 /* Computes fl(a*a) and err(a*a).  Faster than the above method. */
@@ -171,19 +167,6 @@ inline void dd_real::two_sqr(double a)
   hi = a * a;
   aa.split(a);
   lo_ = ((aa.hi * aa.hi - hi) + 2.0 * aa.hi * aa.lo_) + aa.lo_ * aa.lo_;
-  checksigns();
-}
-
-void dd_real::checksigns()
-{
-  //it's actually legal to have hi>0, lo<0
-  /*if (((hi>0) && (lo<0)) ||
-      ((hi<0) && (lo>0)))
-  {
-    int x;
-    x=3;
-    x++;
-  }*/
 }
 
 //hack if you don't want to mess with FPU control word... but is a nightmare
@@ -196,7 +179,6 @@ void dd_real::lshift(int exp)
   //should I just adjust exponent in *(int *)&hi or what
   hi=ldexp(hi, exp);
   lo_=ldexp(lo_, exp);
-  checksigns();
 }
 
 void dd_real::add_double(double h2)
@@ -205,7 +187,6 @@ void dd_real::add_double(double h2)
   se.two_sum(hi, h2);
   se.lo_ += lo_;
   quick_two_sum(se.hi, se.lo_);
-  checksigns();
 }
 
 void dd_real::mul_double(double h2)
@@ -214,7 +195,6 @@ void dd_real::mul_double(double h2)
   p.two_prod(hi, h2);
   p.lo_ += lo_*h2;
   quick_two_sum(p.hi, p.lo_);
-  checksigns();
 }
 
 void dd_real::add(double h2, double l2)
@@ -238,7 +218,6 @@ void dd_real::add(double h2, double l2)
   s.lo += t.lo;
   quick_two_sum(s.hi, s.lo);
 */
-  checksigns();
 }
 
 void dd_real::mul(double h2, double l2)
@@ -266,7 +245,6 @@ void dd_real::mul(double h2, double l2)
   hx = MAKE_DOUBLE(th, C-hi);
   lo = MAKE_DOUBLE(tl, c+hx);
 */
-  checksigns();
 }
 
 void dd_real::sqr()
@@ -277,7 +255,6 @@ void dd_real::sqr()
   p.lo_ += 2.0 * hi * lo_;
   p.lo_ += lo_ * lo_;
   quick_two_sum(p.hi, p.lo_);
-  checksigns();
 }
 
 double dd_real::radixfloor() const
@@ -331,7 +308,6 @@ void dd_real::recip()
   quick_two_sum(q1, q2);
   add(q3, 0);
 #endif
-  checksigns();
 }
 
 void dd_real::sqrt()
@@ -372,7 +348,6 @@ void dd_real::sqrt()
   lo_=0;
   add(ax, 0);
   //return dd_real::add(ax, (a - dd_real::sqr(ax)).x[0] * (x * 0.5));
-  checksigns();
 }
 
 void dd_real::round()

@@ -83,7 +83,7 @@ signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
 protected:
-  MandelMath::worker_multi *currentWorker_; //for Position and Orbit
+  MandelMath::worker_multi *currentWorker; //for Position and Orbit
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore
   MandelPointStore *pointStore_;
@@ -101,21 +101,18 @@ protected:
   MandelEvaluator **threads;
   QElapsedTimer timerWriteToImage;
 
+  MandelMath::worker_multi::Allocator *wtiPointAllocator;
+  MandelPoint *wtiPoint;
   struct Position
   {
     static constexpr int LEN=2;
     MandelMath::worker_multi *worker;
-#if NUMBER_DOUBLE_EXISTS
-    //MandelMath::worker_multi_double number_worker_double_template;
-#endif //NUMBER_DOUBLE_EXISTS
-    //MandelMath::number_worker_ddouble number_worker_ddouble_template;
-    //MandelMath::number_worker_multi number_worker_multi_template;
     MandelMath::complex center;
     int step_log;
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    Position(MandelMath::worker_multi::Allocator *allocator);//: worker(worker), center(worker), ;
+    Position(MandelMath::worker_multi::Allocator *allocator);
     ~Position();
     void assign(Position *src);
     //void setNumberType(MandelMath::worker_multi::Type ntype);
@@ -155,8 +152,7 @@ protected:
     ~Orbit();
     constexpr static int LEN=MandelEvaluator::LEN+MandelPoint::LEN+5+Bulb::LEN;
   } *orbit_;
-  //constexpr static int INDEX_OF_POINTDATA=Position::LEN+MandelEvaluator::LEN;
-  constexpr static int LEN=ShareableViewInfo::LEN+Position::LEN+Orbit::LEN  +4;
+  constexpr static int LEN=ShareableViewInfo::LEN+MandelPoint::LEN+Position::LEN+Orbit::LEN  +4;
 };
 
 

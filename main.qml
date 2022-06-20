@@ -291,7 +291,7 @@ Window {
     }
 
     Timer {
-        interval: 1000;
+        interval: 100;
         repeat: true;
         running: true;
         onTriggered: {
@@ -308,11 +308,11 @@ Window {
             if (rbuttonViewLagu.checked)
             {
               laguerreModel.getTimes();
-              laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
+              labelInfoSpec.text=laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
               laguerreImageCombiner.update();
               labelXY.text=laguerreModel.getTextXY();
               labelInfoGen.text=laguerreModel.getTextInfoGen();
-              labelInfoSpec.text=laguerreModel.getTextInfoSpec();
+              //labelInfoSpec.text=laguerreModel.getTextInfoSpec();
             };
         }
     }

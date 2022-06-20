@@ -2489,7 +2489,7 @@ solve [0=0+d*C+e*R*C+f*C^2/2+g*R^3/6+h*R^2*C/2, -1=e*C+g*R^2/2+h*R*C, -124.79612
         fz_error<3*(1+bulbe.f_zz.getMag_double())*currentWorker->eps2() &&
         (did_reduce_period || *is_card))
     {
-      nop();
+      nop(); //ok
       break;
     };
     nop();
