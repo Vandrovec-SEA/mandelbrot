@@ -297,11 +297,11 @@ Window {
         onTriggered: {
             if (rbuttonViewMand.checked)
             {
-              mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
+              labelInfoSpec.text=mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
               mandelImageCombiner.update();
               labelXY.text=mandelModel.getTextXY();
               labelInfoGen.text=mandelModel.getTextInfoGen();
-              labelInfoSpec.text=mandelModel.getTextInfoSpec();
+              //labelInfoSpec.text=mandelModel.getTextInfoSpec();
               busyIndicator.color=(mandelModel.threadsWorking===0?"green":mandelModel.threadsWorking===mandelModel.threadsMax?"red":"yellow")
               busyIndicator2.text=mandelModel.threadsWorking
             };

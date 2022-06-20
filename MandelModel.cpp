@@ -873,11 +873,12 @@ int MandelModel::periodToIndex(int period)
   return c;
 }
 
-void MandelModel::writeToImage(ShareableImageWrapper image)
+int MandelModel::writeToImage(ShareableImageWrapper image)
 {
   //QImage result(imageWidth, imageHeight, QImage::Format::Format_ARGB32);//setPixel in _Premultiplied affects surrounding pixels?! _Premultiplied);
   if (image.image->isNull() || (image.image->width()!=imageWidth) || (image.image->height()!=imageHeight))
-    return;
+    return -1;
+  wtiElapsed.start();
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
@@ -1430,6 +1431,7 @@ void MandelModel::writeToImage(ShareableImageWrapper image)
 
     }
   //return result;
+  return wtiElapsed.elapsed();
 }
 
 void MandelModel::giveWork(MandelEvaluator *evaluator)

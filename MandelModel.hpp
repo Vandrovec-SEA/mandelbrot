@@ -23,7 +23,7 @@ public:
   Q_INVOKABLE void setImageSize(int width, int height);
   void setWorker(MandelMath::number_worker *newWorker);
   void startNewEpoch();
-  Q_INVOKABLE void writeToImage(ShareableImageWrapper img);
+  Q_INVOKABLE int writeToImage(ShareableImageWrapper img);
   void reimToPixel(int *circ_x, int *circ_y, const MandelMath::number_store *re, const MandelMath::number_store *im, MandelMath::number_store *tmp);
   Q_INVOKABLE void paintOrbit(ShareableImageWrapper image, int x, int y);
   Q_INVOKABLE QString pixelXtoRE_str(int x);
@@ -92,6 +92,7 @@ protected:
   constexpr static int MAX_EFFORT=22;//
   int threadCount;
   MandelEvaluator *threads;
+  QElapsedTimer wtiElapsed;
 
   struct Position
   {
