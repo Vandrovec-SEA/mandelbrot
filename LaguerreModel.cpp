@@ -6,7 +6,10 @@
 #include "LaguerreModel.hpp"
 #include "MandelEvaluator.hpp"
 
-LaguerreModel::LaguerreModel(): QObject(), position()
+LaguerreModel::LaguerreModel(): QObject(),
+  paramsAllocator(nullptr), params_(nullptr), currentWorker_(nullptr),
+  storeAllocator(nullptr), storeWorker(nullptr), pointStore_(nullptr),
+  position_(nullptr), orbit_(nullptr)
 {
   unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
   MandelMath::fpu_fix_start(&oldcw);
@@ -15,89 +18,81 @@ LaguerreModel::LaguerreModel(): QObject(), position()
   epoch=0;
   imageWidth=0;
   imageHeight=0;
-  pointStore=nullptr;
+  //pointStore=nullptr;
   lastGivenPointIndex_=0;
   effortBonus=0;
-  orbit.worker=nullptr;
-  orbit.first_mu_re_=0;
-  orbit.first_mu_im=0;
-  orbit.first_mum_re_=0;
-  orbit.first_mum_im_=0;
-  params.period=1;
-  position.worker->init_(&params.base_re_s_, &params.base_re_p, 0);
-  position.worker->init_(&params.base_im_s, &params.base_im_p, 0);
-  position.worker->init_(&params.root_re_s, &params.root_re_p, 0);
-  position.worker->init_(&params.root_im_s, &params.root_im_p, 0);
   //threadCount=4;
   //threadCount=1;//so fast that sending messages is slower QThread::idealThreadCount()-1;
-  threadCount=QThread::idealThreadCount()-1;
-  if (threadCount<1)
-    threadCount=1;
-  threads=new MandelEvaluator[threadCount];
-  for (int t=0; t<threadCount; t++)
-  {
-    //threads[t].setHint(t);
-    QObject::connect(&threads[t], &MandelEvaluator::doneNewton,
-                     this, &LaguerreModel::donePixel,
-                     Qt::ConnectionType::QueuedConnection);
-  }
+  _threadsWorking=0;
+  threadCount=0;
+  threads=nullptr;
+  QObject::connect(this, &LaguerreModel::selectedPrecisionChange,
+                   this, &LaguerreModel::selectedPrecisionChanged);
   QObject::connect(this, &LaguerreModel::doneWork,
                    this, &LaguerreModel::giveWork1,
                    Qt::ConnectionType::QueuedConnection);
-  QObject::connect(this, &LaguerreModel::selectedPrecisionChange,
-                   this, &LaguerreModel::selectedPrecisionChanged);
+  selectedPrecisionChanged();
 }
 
 LaguerreModel::~LaguerreModel()
 {
-  for (int t=0; t<threadCount; t++)
+  for (int t=threadCount-1; t>=0; t--)
   {
-    threads[t].wantStop=true;
-    threads[t].quit();
-    threads[t].wait(1000);
+    threads[t]->wantStop=true;
+    threads[t]->quit();
+  }
+  for (int t=threadCount-1; t>=0; t--)
+  {
+    threads[t]->wait(1000);
+    delete threads[t];
   }
   delete[] threads;
   threadCount=0;
   threads=nullptr;
-  orbit.evaluator.wantStop=true;
-  orbit.evaluator.quit();
-  orbit.evaluator.wait(1000);
-  if (orbit.worker!=nullptr)
-    orbit.pointData.cleanup(orbit.worker);
-
-  for (int i=imageWidth*imageHeight-1; i>=0; i--)
+  if (orbit_!=nullptr)
   {
-    pointStore[i].cleanup(position.worker);
+    orbit_->evaluator.wantStop=true;
+    orbit_->evaluator.quit();
+    orbit_->evaluator.wait(1000);
+    delete orbit_;
   }
 
-  delete[] pointStore;
-  pointStore=nullptr;
-  position.worker->cleanup(&params.root_im_s);
-  position.worker->cleanup(&params.root_re_s);
-  position.worker->cleanup(&params.base_im_s);
-  position.worker->cleanup(&params.base_re_s_);
+  delete position_;
+  delete params_;
+  delete paramsAllocator;
+
+  delete storeAllocator;
+  delete storeWorker;
+  delete currentWorker_;
+  storeWorker=nullptr;
+  currentWorker_=nullptr;
+  /*for (int i=imageWidth*imageHeight-1; i>=0; i--)
+  {
+    pointStore[i].cleanup(position.worker);
+  }*/
+
+  delete[] pointStore_;
+  pointStore_=nullptr;
   imageWidth=0;
   imageHeight=0;
 }
 
 QString LaguerreModel::pixelXtoRE_str(int x)
 {
-  MandelMath::number_store num;
-  position.worker->assign(&num, &position.center_re_s);
-  position.worker->add_double(&num, (x - imageWidth/2)*position.step_size__);
-  QString result=position.worker->toString(&num);
-  position.worker->cleanup(&num);
+  MandelMath::number num(currentWorker_);
+  num.assign(position_->center.re);
+  num.add_double((x - imageWidth/2)*position_->step_size__);
+  QString result=currentWorker_->toString(num.ptr);
   return result;
 }
 
 QString LaguerreModel::pixelYtoIM_str(int y)
 {
 //  return (y - imageHeight/2)*position.step_size+position.center_im;
-  MandelMath::number_store num;
-  position.worker->assign(&num, &position.center_im_s);
-  position.worker->add_double(&num, (y - imageHeight/2)*position.step_size__);
-  QString result=position.worker->toString(&num);
-  position.worker->cleanup(&num);
+  MandelMath::number num(currentWorker_);
+  num.assign(position_->center.im);
+  num.add_double((y - imageHeight/2)*position_->step_size__);
+  QString result=currentWorker_->toString(num.ptr);
   return result;
 }
 
@@ -106,91 +101,90 @@ QString LaguerreModel::getTimes()
   QString result;
   /*for (int t=0; t<threadCount; t++)
     result+=QString("%1-%2[%3,%4],").
-        arg((threads[t].timeOuterTotal)/1000000000.0, 0, 'f', 3).
-        arg((threads[t].timeInnerTotal)/1000000000.0, 0, 'f', 3).
-        arg((threads[t].timeInvokePostTotal)/1000000000.0, 0, 'f', 3).
-        arg((threads[t].timeInvokeSwitchTotal)/1000000000.0, 0, 'f', 3);*/
+        arg((threads[t]->timeOuterTotal)/1000000000.0, 0, 'f', 3).
+        arg((threads[t]->timeInnerTotal)/1000000000.0, 0, 'f', 3).
+        arg((threads[t]->timeInvokePostTotal)/1000000000.0, 0, 'f', 3).
+        arg((threads[t]->timeInvokeSwitchTotal)/1000000000.0, 0, 'f', 3);*/
   result="X-X";
   return result;
 }
 
 QString LaguerreModel::getTextXY()
 {
-  if (orbit.worker==nullptr)
+  if (currentWorker_==nullptr || orbit_==nullptr)
     return "-";
-  return orbit.worker->toString(&orbit.evaluator.currentParams.c_re)+" +i* "+orbit.worker->toString(&orbit.evaluator.currentParams.c_im);
+  return currentWorker_->toString(orbit_->evaluator.currentParams.c.re)+" +i* "+
+         currentWorker_->toString(orbit_->evaluator.currentParams.c.im);
+}
+
+QString doubleToString(double x)
+{
+  if (x>0)
+    return QString("+%1").arg(x, 10, 'f');
+  else
+    return QString("%1").arg(x, 10, 'f');//returns like 50 digits QString::number(x, 10, 'f');
 }
 
 QString LaguerreModel::getTextInfoGen()
 {
-  if (orbit.worker==nullptr)
+  if (currentWorker_==nullptr || orbit_==nullptr)
     return "-";
   int orbit_x, orbit_y;
   {
-    MandelMath::number_store tmp;
-    MandelMath::number_place tmp_p;
-    orbit.worker->init_(&tmp, &tmp_p);
-    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_re);
-    orbit.worker->sub(&tmp, &position.center_re_s);
-    orbit_x=qRound(orbit.worker->toDouble(&tmp)/position.step_size__)+imageWidth/2;
+    MandelMath::number tmp(currentWorker_);
+    tmp.assign(orbit_->evaluator.currentParams.c.re);
+    tmp.sub(position_->center.re);
+    orbit_x=qRound(currentWorker_->toDouble(tmp.ptr)/position_->step_size__)+imageWidth/2;
 
-    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_im);
-    orbit.worker->sub(&tmp, &position.center_im_s);
-    orbit_y=imageHeight/2-qRound(orbit.worker->toDouble(&tmp)/position.step_size__);
-    orbit.worker->cleanup(&tmp);
+    tmp.assign(orbit_->evaluator.currentParams.c.im);
+    tmp.sub(position_->center.im);
+    orbit_y=imageHeight/2-qRound(currentWorker_->toDouble(tmp.ptr)/position_->step_size__);
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
-  LaguerrePoint *data=&this->pointStore[orbit_x+imageWidth*orbit_y];
+  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+  LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
 
   QString state;
-  switch (data->state)
+  switch (data_.store->state)
   {
-    case LaguerrePoint::State::stUnknown:
+    case LaguerrePointStore::State::stUnknown:
       state="Unk"; break;
-    case LaguerrePoint::State::stResolved:
+    case LaguerrePointStore::State::stResolved:
       state="OK"; break;
-    case LaguerrePoint::State::stFail:
+    case LaguerrePointStore::State::stFail:
       state="Err"; break;
   }
 
-  return "Per="+QString::number(params.period)+" "+state+" iter="+QString::number(data->iter)+
-        " mu="+QString::number(orbit.first_mu_re_, 'f', 3)+","+QString::number(orbit.first_mu_im, 'f', 3)+
-        " mum="+QString::number(orbit.first_mum_re_, 'f', 3)+","+QString::number(orbit.first_mum_im_, 'f', 3);
+  return "Per="+QString::number(params_->period)+" "+state+" iter="+QString::number(data_.store->iter)+
+        " mu="+QString::number(orbit_->first_mu_re_, 'f', 3)+","+QString::number(orbit_->first_mu_im, 'f', 3)+
+        " mum="+QString::number(orbit_->first_mum_re_, 'f', 3)+","+QString::number(orbit_->first_mum_im_, 'f', 3);
 }
 
 QString LaguerreModel::getTextInfoSpec()
 {
-  if (orbit.worker==nullptr)
+  if (currentWorker_==nullptr)
     return "-";
   int orbit_x, orbit_y;
   {
-    MandelMath::number_store tmp;
-    MandelMath::number_place tmp_p;
-    orbit.worker->init_(&tmp, &tmp_p);
-    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_re);
-    orbit.worker->sub(&tmp, &position.center_re_s);
-    orbit_x=qRound(orbit.worker->toDouble(&tmp)/position.step_size__)+imageWidth/2;
-
-    orbit.worker->assign(&tmp, &orbit.evaluator.currentParams.c_im);
-    orbit.worker->sub(&tmp, &position.center_im_s);
-    orbit_y=imageHeight/2-qRound(orbit.worker->toDouble(&tmp)/position.step_size__);
-    orbit.worker->cleanup(&tmp);
+    MandelMath::number tmp(currentWorker_);
+    reimToPixel(&orbit_x, &orbit_y, &orbit_->evaluator.currentParams.c, &tmp);
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
-  LaguerrePoint *data=&this->pointStore[orbit_x+imageWidth*orbit_y];
+  MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+  LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
 
-  switch (data->state)
+  switch (data_.store->state)
   {
-    case LaguerrePoint::State::stUnknown:
+    case LaguerrePointStore::State::stUnknown:
       return " ";
       break;
-    case LaguerrePoint::State::stResolved:
+    case LaguerrePointStore::State::stResolved:
     {
-      MandelMath::complex fz(orbit.worker, &orbit.pointData.fz_r_re, &orbit.pointData.fz_r_im, true);
+      //MandelMath::complex fz(orbit.worker, &orbit.pointData.fz_r_re, &orbit.pointData.fz_r_im, true);
       QString naiveChoice;
-      switch (orbit.pointData.naiveChoice)
+      switch (orbit_->pointData.store->naiveChoice)
       {
         case NewtonNaiveChoice::nc03: naiveChoice="0.3"; break;
         case NewtonNaiveChoice::nc05: naiveChoice="0.5"; break;
@@ -202,11 +196,11 @@ QString LaguerreModel::getTextInfoSpec()
         case NewtonNaiveChoice::nc60: naiveChoice="60"; break;
         case NewtonNaiveChoice::ncClose: naiveChoice="Close"; break;
       }
-      return QString("attr=")+QString::number(orbit.worker->toDouble(fz.getMagTmp()))+
-             QString(" firstM=")+QString::number(orbit.pointData.firstM)+
+      return QString("attr=")+QString::number(orbit_->pointData.fz_r.getMag_double())+
+             QString(" firstM=")+QString::number(orbit_->pointData.store->firstM)+
              QString(" NChoice=")+naiveChoice;
     } break;
-    case LaguerrePoint::State::stFail:
+    case LaguerrePointStore::State::stFail:
       return " ";
   }
   return "-?-?-";
@@ -214,47 +208,44 @@ QString LaguerreModel::getTextInfoSpec()
 
 void LaguerreModel::setParams(ShareableViewInfo viewInfo)
 {
-  position.setNumberType(viewInfo.worker->ntype());
-  params.period=viewInfo.period;
-  if (position.worker==nullptr)
+  //position.setNumberType(viewInfo.worker->ntype());
+  params_->period=viewInfo.period;
+  if (position_==nullptr || params_==nullptr || orbit_==nullptr)
     dbgPoint();
-  else
+
+  switch (currentWorker_->ntype())
   {
-    position.worker->assign(&params.base_re_s_, &viewInfo.re_);
-    position.worker->assign(&params.base_im_s, &viewInfo.im);
-    position.worker->assign(&params.root_re_s, &viewInfo.root_re);
-    position.worker->assign(&params.root_im_s, &viewInfo.root_im);
+    case MandelMath::worker_multi::Type::typeEmpty:
+      dbgPoint();
+      goto lolwut;
+    case MandelMath::worker_multi::Type::typeDouble: lolwut:
+    {
+      //watch this
+      MandelMath::worker_multi_double tmpworker(viewInfo.originalAllocator);
+      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
+      params_->base.assign(&tmpinfo.c);
+      params_->root.assign(&tmpinfo.root);
+    } break;
 
-    MandelMath::number_store old_cre_s, old_cim_s;
-    MandelMath::number_place old_cre_p, old_cim_p;
-    position.worker->init_(&old_cre_s, &old_cre_p);
-    position.worker->init_(&old_cim_s, &old_cim_p);
-    position.worker->assign(&old_cre_s, &position.center_re_s);
-    position.worker->assign(&old_cim_s, &position.center_im_s);
-    int old_step_log=position.step_log;
-
-    position.setView(&viewInfo.re_, &viewInfo.im, viewInfo.scale);
-
-    transformStore(pointStore, 0, 0, &old_cre_s, &old_cim_s,
-                   pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
-                   position.step_log-old_step_log, position.step_log);
-    position.worker->cleanup(&old_cim_s);
-    position.worker->cleanup(&old_cre_s);
-
-    viewInfo.worker->cleanup(&viewInfo.root_im);
-    viewInfo.worker->cleanup(&viewInfo.root_re);
-    viewInfo.worker->cleanup(&viewInfo.im);
-    viewInfo.worker->cleanup(&viewInfo.re_);
-
-    startNewEpoch();
   }
+  MandelMath::complex old_c(currentWorker_);
+  old_c.assign(&position_->center);
+  int old_step_log=position_->step_log;
+
+  position_->setView(&params_->base, viewInfo.scale);
+
+  transformStore(currentWorker_, storeWorker, pointStore_, 0, 0, &old_c,
+                 currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
+                 position_->step_log-old_step_log, position_->step_log);
+
+  startNewEpoch();
 }
 
-void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
-                                   LaguerrePoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
+void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelMath::worker_multi *old_sworker, LaguerrePointStore *old_store, int old_width, int old_height, const MandelMath::complex *old_c,
+                                   MandelMath::worker_multi *new_worker, MandelMath::worker_multi *new_sworker, LaguerrePointStore *new_store, int new_width, int new_height, const MandelMath::complex *new_c,
                                    int inlog, int new_step_log)
 {
-  if (position.worker==nullptr)
+  if (currentWorker_==nullptr)
   {
     dbgPoint();
     return;
@@ -281,9 +272,11 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
     //if (fabs(delta_y-qRound(delta_y))>0.0001)
     //  dbgPoint();
     //int delta_y_int=qRound(delta_y);
-    position.worker->sub(old_cim, new_cim); //and reversing y at the last minute
-    position.worker->lshift(old_cim, new_step_log+step_scale_n_shift);
-    delta_y_int=position.worker->toRound(old_cim);
+    MandelMath::number tmp(old_worker);
+    old_worker->assign(tmp.ptr, old_c->im);
+    old_worker->sub(tmp.ptr, new_c->im); //and reversing y at the last minute
+    old_worker->lshift(tmp.ptr, new_step_log+step_scale_n_shift);
+    delta_y_int=old_worker->toRound(tmp.ptr);
     delta_y_int-=(new_height/2)<<step_scale_n_shift;
 
     //double delta_x=-new_width/2+(new_cre-old_cre)/new_step;
@@ -291,17 +284,14 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
     //if (fabs(delta_x-qRound(delta_x))>0.0001)
     //  dbgPoint();
     //int delta_x_int=qRound(delta_x);
-    position.worker->rsub(old_cre, new_cre);
-    position.worker->lshift(old_cre, new_step_log+step_scale_n_shift);
-    delta_x_int=position.worker->toRound(old_cre);
+    old_worker->assign(tmp.ptr, new_c->re);
+    old_worker->sub(tmp.ptr, old_c->re);
+    old_worker->lshift(tmp.ptr, new_step_log+step_scale_n_shift);
+    delta_x_int=old_worker->toRound(tmp.ptr);
     delta_x_int-=(new_width/2)<<step_scale_n_shift;
   }
 
-  MandelMath::number_store c_re;
-  MandelMath::number_store c_im;
-  MandelMath::number_place cre_p, cim_p;
-  position.worker->init_(&c_re, &cre_p);
-  position.worker->init_(&c_im, &cim_p);
+  MandelMath::complex c(new_worker);
   for (int newy=0; newy<new_height; newy++)
   {
     int oldy;
@@ -309,7 +299,8 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
       oldy=(old_height/2) + (((newy<<step_scale_n_shift)+delta_y_int)>>step_scale_d_shift);
     else
       oldy=-1;//call reset() in the second loop, we may still need the points  =imageHeight;
-    position.pixelYtoIM(new_height/2-newy, &c_im);
+    new_worker->assign(c.im, position_->center.im);
+    new_worker->add_double(c.im, (new_height/2-newy)*position_->step_size__);
     for (int newx=0; newx<new_width; newx++)
     {
       int oldx;
@@ -320,11 +311,17 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
       if ((oldy>newy) || ((oldy==newy) && (oldx>newx)))
       {
         if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-          new_store[newy*new_width+newx].assign(position.worker, old_store[oldy*old_width+oldx]);
+        {
+          new_store[newy*new_width+newx].assign(&old_store[oldy*old_width+oldx]);
+          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, old_sworker, (oldy*old_width+oldx)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+        }
         else
         {
-          position.pixelXtoRE(newx - new_width/2, &c_re);
-          new_store[newy*new_width+newx].zero(position.worker, &c_re, &c_im);
+          new_worker->assign(c.re, position_->center.re);
+          new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
+          MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+          LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
+          pt.zero(/*new_sworker, (newy*new_width+newx)*LaguerrePoint::LEN,*/ &c);
         }
       };
     }
@@ -336,7 +333,8 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
       oldy=(old_height/2) + (((newy<<step_scale_n_shift)+delta_y_int)>>step_scale_d_shift);
     else
       oldy=-1;
-    position.pixelYtoIM(new_height/2-newy, &c_im);
+    new_worker->assign(c.im, position_->center.im);
+    new_worker->add_double(c.im, (new_height/2-newy)*position_->step_size__);
     for (int newx=new_width-1; newx>=0; newx--)
     {
       int oldx;
@@ -347,37 +345,34 @@ void LaguerreModel::transformStore(LaguerrePoint *old_store, int old_width, int 
       if ((oldy<newy) || ((oldy==newy) && (oldx<=newx)))
       {
         if ((oldy>=0) && (oldy<old_height) && (oldx>=0) && (oldx<old_width))
-          new_store[newy*new_width+newx].assign(position.worker, old_store[oldy*old_width+oldx]);
+        {
+          new_store[newy*new_width+newx].assign(&old_store[oldy*old_width+oldx]);
+          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, old_sworker, (oldy*old_width+oldx)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+        }
         else
         {
-          position.pixelXtoRE(newx - new_width/2, &c_re);
-          new_store[newy*new_width+newx].zero(position.worker, &c_re, &c_im);
+          new_worker->assign(c.re, position_->center.re);
+          new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
+          MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+          LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
+          pt.zero(/*new_worker, (newy*new_width+newx)*LaguerrePoint::LEN,*/ &c);
         }
       }
     }
   }
-  position.worker->cleanup(&c_re);
-  position.worker->cleanup(&c_im);
 }
 
-void LaguerreModel::setView_(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale)
+void LaguerreModel::setView_(const MandelMath::complex *c, double scale)
 {
-  MandelMath::number_store old_cre_s, old_cim_s;
-  MandelMath::number_place old_cre_p, old_cim_p;
-  position.worker->init_(&old_cre_s, &old_cre_p);
-  position.worker->init_(&old_cim_s, &old_cim_p);
-  position.worker->assign(&old_cre_s, &position.center_re_s);
-  position.worker->assign(&old_cim_s, &position.center_im_s);
-  int old_step_log=position.step_log;
+  MandelMath::complex old_c(currentWorker_);
+  old_c.assign(&position_->center);
+  int old_step_log=position_->step_log;
 
-  position.setView(c_re, c_im, scale);
+  position_->setView(c, scale);
 
-  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
-                 pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
-                 position.step_log-old_step_log, position.step_log);
-
-  position.worker->cleanup(&old_cim_s);
-  position.worker->cleanup(&old_cre_s);
+  transformStore(currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
+                 position_->step_log-old_step_log, position_->step_log);
 
   startNewEpoch();
 }
@@ -385,46 +380,32 @@ void LaguerreModel::setView_(const MandelMath::number_store *c_re, const MandelM
 void LaguerreModel::drag(double delta_x, double delta_y)
 {
   //qDebug()<<"drag ("<<delta_x<<","<<delta_y<<")";
-  MandelMath::number_store old_cre_s, old_cim_s;
-  MandelMath::number_place old_cre_p, old_cim_p;
-  position.worker->init_(&old_cre_s, &old_cre_p);
-  position.worker->init_(&old_cim_s, &old_cim_p);
-  position.worker->assign(&old_cre_s, &position.center_re_s);
-  position.worker->assign(&old_cim_s, &position.center_im_s);
+  MandelMath::complex old_c(currentWorker_);
+  old_c.assign(&position_->center);
 
   int dx=qRound(delta_x);
   int dy=qRound(delta_y);
-  position.move(dx, dy);
+  position_->move(dx, dy);
   //qDebug()<<"new c: re="<<position.worker->toString(&position.center_re_s)<<",im="<<position.worker->toString(&position.center_im_s);
 
-  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
-                 pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
-                 0, position.step_log);
-
-  position.worker->cleanup(&old_cim_s);
-  position.worker->cleanup(&old_cre_s);
+  transformStore(currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
+                 0, position_->step_log);
 
   startNewEpoch();
 }
 
 void LaguerreModel::zoom(double x, double y, int inlog)
 {
-  MandelMath::number_store old_cre_s, old_cim_s;
-  MandelMath::number_place old_cre_p, old_cim_p;
-  position.worker->init_(&old_cre_s, &old_cre_p);
-  position.worker->init_(&old_cim_s, &old_cim_p);
-  position.worker->assign(&old_cre_s, &position.center_re_s);
-  position.worker->assign(&old_cim_s, &position.center_im_s);
-  int old_step_log=position.step_log;
+  MandelMath::complex old_c(currentWorker_);
+  old_c.assign(&position_->center);
+  int old_step_log=position_->step_log;
 
-  position.scale(inlog, qRound(x)-imageWidth/2, imageHeight/2-qRound(y));
+  position_->scale(inlog, qRound(x)-imageWidth/2, imageHeight/2-qRound(y));
 
-  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
-                 pointStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
-                 position.step_log-old_step_log, position.step_log);
-
-  position.worker->cleanup(&old_cim_s);
-  position.worker->cleanup(&old_cre_s);
+  transformStore(currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
+                 position_->step_log-old_step_log, position_->step_log);
 
   startNewEpoch();
 }
@@ -436,82 +417,54 @@ void LaguerreModel::setImageSize(int width, int height)
   if ((width==imageWidth) && (height==imageHeight))
     return;
   int newLength=width*height;
-  LaguerrePoint *newStore=new LaguerrePoint[newLength];
-  QString size_as_text=QString::number(sizeof(LaguerrePoint)*newLength);
-  for (int pos=size_as_text.length()-3; pos>0; pos-=3)
+  LaguerrePointStore *newStore_=new LaguerrePointStore[newLength];
   {
-    size_as_text.insert(pos, '\'');
+    QString size_as_text=QString::number(newLength*sizeof(LaguerrePointStore));
+    for (int pos=size_as_text.length()-3; pos>0; pos-=3)
+      size_as_text.insert(pos, '\'');
+    qDebug()<<"laguerreStore uses"<<size_as_text.toLocal8Bit().constData()<<"B";
   }
-  qDebug()<<"laguerreStore uses"<<size_as_text.toLocal8Bit().constData()<<"B";
-  for (int i=0; i<newLength; i++)
-    newStore[i].init(position.worker);
+  MandelMath::worker_multi *newStoreWorker;
+  MandelMath::worker_multi::Allocator *newStoreAllocator;
+  switch (storeWorker->ntype())
+  {
+    case MandelMath::worker_multi::Type::typeEmpty:
+      dbgPoint();
+      goto lolwut;
+    case MandelMath::worker_multi::Type::typeDouble: lolwut:
+      newStoreWorker=new MandelMath::worker_multi_double(newLength*LaguerrePoint::LEN);
 
-  MandelMath::number_store old_cre_s, old_cim_s;
-  MandelMath::number_place old_cre_p, old_cim_p;
-  position.worker->init_(&old_cre_s, &old_cre_p);
-  position.worker->init_(&old_cim_s, &old_cim_p);
-  position.worker->assign(&old_cre_s, &position.center_re_s);
-  position.worker->assign(&old_cim_s, &position.center_im_s);
+      break;
+#if !ONLY_DOUBLE_WORKER
+    case MandelMath::worker_multi::Type::typeFloat128:
+      newStoreWorker=new MandelMath::worker_multi_float128(newLength*LaguerrePoint::LEN);
+      break;
+    case MandelMath::worker_multi::Type::typeDDouble:
+      newStoreWorker=new MandelMath::worker_multi_ddouble(newLength*LaguerrePoint::LEN);
+      break;
+    case MandelMath::worker_multi::Type::typeQDouble:
+      newStoreWorker=new MandelMath::worker_multi_qdouble(newLength*LaguerrePoint::LEN);
+      break;
+#endif
+  }
+  newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), newLength*LaguerrePoint::LEN);
 
-  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
-                 newStore, width, height, &position.center_re_s, &position.center_im_s,
-                 0, position.step_log);
 
-  position.worker->cleanup(&old_cim_s);
-  position.worker->cleanup(&old_cre_s);
+  MandelMath::complex old_c(currentWorker_);
+  old_c.assign(&position_->center);
 
-  for (int i=imageWidth*imageHeight-1; i>=0; i--)
-    pointStore[i].cleanup(position.worker);
-  delete[] pointStore;
-  pointStore=newStore;
+  transformStore(currentWorker_, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 currentWorker_, newStoreWorker, newStore_, width, height, &position_->center,
+                 0, position_->step_log);
+
+  delete storeAllocator;
+  delete storeWorker;
+  storeWorker=newStoreWorker;
+  storeAllocator=newStoreAllocator;
+  delete[] pointStore_;
+  pointStore_=newStore_;
   imageWidth=width;
   imageHeight=height;
-
-  startNewEpoch();
-}
-
-void LaguerreModel::setWorker(MandelMath::number_worker *newWorker)
-{
-  if ((imageWidth<=0) || (imageHeight<=0)) //Qt begins with width=0, height=-13
-    return;
-  /*
-  int newLength=imageWidth*imageHeight;
-  LaguerrePoint *newStore=new LaguerrePoint[newLength];
-  QString size_as_text=QString::number(sizeof(LaguerrePoint)*newLength);
-  for (int pos=size_as_text.length()-3; pos>0; pos-=3)
-  {
-    size_as_text.insert(pos, '\'');
-  }
-  qDebug()<<"laguerreStore uses"<<size_as_text.toLocal8Bit().constData()<<"B"; //lots of work to skip those quotes... can't skip spaces at all
-  for (int i=0; i<newLength; i++)
-    newStore[i].init(position.worker);
-
-  MandelMath::number_store old_cre_s, old_cim_s;
-  position.worker->init(&old_cre_s);
-  position.worker->init(&old_cim_s);
-  position.worker->assign(&old_cre_s, &position.center_re_s);
-  position.worker->assign(&old_cim_s, &position.center_im_s);
-
-  MandelMath::number_worker *oldWorker=position.worker;
-  position.setNumberType(newWorker->ntype());
-
-  transformStore(pointStore, imageWidth, imageHeight, &old_cre_s, &old_cim_s,
-                 newStore, imageWidth, imageHeight, &position.center_re_s, &position.center_im_s,
-                 oldWorker, 0, position.step_log);
-
-  oldWorker->cleanup(&old_cim_s);
-  oldWorker->cleanup(&old_cre_s);
-
-  for (int i=imageWidth*imageHeight-1; i>=0; i--)
-    pointStore[i].cleanup(oldWorker);
-  delete[] pointStore;
-  pointStore=newStore;
-  */
-  MandelMath::number_worker::Type oldType=position.worker->ntype();
-  position.setNumberType(newWorker->ntype());
-  for (int i=imageWidth*imageHeight-1; i>=0; i--)
-    pointStore[i].promote(oldType, position.worker->ntype());
-
 
   startNewEpoch();
 }
@@ -522,22 +475,33 @@ void LaguerreModel::startNewEpoch()
   lastGivenPointIndex_=0;
   effortBonus=0;
   for (int t=0; t<threadCount; t++)
-    if (threads[t].currentParams.pixelIndex<0)
-      giveWork(&threads[t]);
+    if (threads[t]->currentParams.pixelIndex<0)
+      giveWork(threads[t]);
 }
 
 void LaguerreModel::giveWorkAll()
 {
   for (int t=0; t<threadCount; t++)
-    if (threads[t].currentParams.pixelIndex<0)
-      giveWork(&threads[t]);
+    if (threads[t]->currentParams.pixelIndex<0)
+      giveWork(threads[t]);
+}
+
+void LaguerreModel::reimToPixel(int *circ_x, int *circ_y, const MandelMath::complex *c, MandelMath::number *tmp)
+{
+  tmp->assign(c->re);
+  tmp->sub(position_->center.re);
+  *circ_x=qRound(currentWorker_->toDouble(tmp->ptr)/position_->step_size__)+imageWidth/2;
+
+  tmp->assign(c->im);
+  tmp->sub(position_->center.im);
+  *circ_y=imageHeight/2-qRound(currentWorker_->toDouble(tmp->ptr)/position_->step_size__);
 }
 
 void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 {
   if ((x<0) || (x>=imageWidth) || (y<0) || (y>=imageHeight))
     return;
-  if (params.period<=0)
+  if (params_->period<=0)
     return;
 
   QImage newOverlay(imageWidth, imageHeight, QImage::Format::Format_ARGB32);
@@ -550,37 +514,26 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   };
 
   //LaguerrePoint *data=&pointStore[y*imageWidth+x];
-  if (orbit.worker!=position.worker)
-  {
-    MandelMath::number_worker::Type oldType, newType=position.worker->ntype();
-    if (orbit.worker==nullptr)
-      oldType=MandelMath::number_worker::Type::typeEmpty;
-    else
-      oldType=orbit.worker->ntype();
-    orbit.pointData.promote(oldType, newType);
-    orbit.worker=position.worker;
-  };
-  /*switch (data->state)
+  if (orbit_==nullptr)
+    dbgPoint();
+  else if (currentWorker_==nullptr)
+    dbgPoint();
+  else if (orbit_->currentWorker->ntype()!=currentWorker_->ntype())
+    dbgPoint();
+  /*switch (data_->state)
   {
     case LaguerrePoint::State::stUnknown:
     case LaguerrePoint::State::stResolved:
     case LaguerrePoint::State::stFail:
     default: ;
   }*/
-  orbit.evaluator.switchType(position.worker);
+  //orbit.evaluator.switchType(position.worker);
+  MandelMath::number tmp(currentWorker_);//=&orbit.evaluator.currentData.f_re;
   {
     int circ_x, circ_y;
-    MandelMath::number_store *tmp=&orbit.evaluator.currentData.f_re;
     painter.setBrush(Qt::BrushStyle::NoBrush);
     painter.setPen(QColor(0xff, 0, 0)); //paint c
-    position.worker->assign(tmp, &params.base_re_s_);
-    position.worker->sub(tmp, &position.center_re_s);
-    position.worker->lshift(tmp, position.step_log);
-    circ_x=position.worker->toDouble(tmp)+imageWidth/2;
-    position.worker->assign(tmp, &params.base_im_s);
-    position.worker->sub(tmp, &position.center_im_s);
-    position.worker->lshift(tmp, position.step_log);
-    circ_y=imageHeight/2-position.worker->toDouble(tmp);
+    reimToPixel(&circ_x, &circ_y, &params_->base, &tmp);
     if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
     {
       painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -592,14 +545,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
     painter.setBrush(Qt::BrushStyle::NoBrush);
     painter.setPen(QColor(0xff, 0, 0)); //paint root as +
-    position.worker->assign(tmp, &params.root_re_s);
-    position.worker->sub(tmp, &position.center_re_s);
-    position.worker->lshift(tmp, position.step_log);
-    circ_x=position.worker->toDouble(tmp)+imageWidth/2;
-    position.worker->assign(tmp, &params.root_im_s);
-    position.worker->sub(tmp, &position.center_im_s);
-    position.worker->lshift(tmp, position.step_log);
-    circ_y=imageHeight/2-position.worker->toDouble(tmp);
+    reimToPixel(&circ_x, &circ_y, &params_->root, &tmp);
     if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
     {
       painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -614,60 +560,49 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   //evaluator.data.root .. found root (temporary)
   //pointData.f .. not used
   //pointData.fz .. result f'
-  position.pixelXtoRE(x-imageWidth/2, &orbit.evaluator.currentParams.c_re); //remember for text labels
-  position.pixelYtoIM(imageHeight/2-y, &orbit.evaluator.currentParams.c_im);
-  orbit.evaluator.currentParams.epoch=epoch;
-  orbit.evaluator.currentParams.pixelIndex=0;
-  orbit.pointData.zero(position.worker, &orbit.evaluator.currentParams.c_re, &orbit.evaluator.currentParams.c_im);
-  MandelMath::complex base(orbit.worker, &params.base_re_s_, &params.base_im_s, true);
-  orbit.worker->assign(&orbit.evaluator.currentData.root_re, &orbit.evaluator.currentParams.c_re);
+  position_->pixelXtoRE(x-imageWidth/2, orbit_->evaluator.currentParams.c.re); //remember for text labels
+  position_->pixelYtoIM(imageHeight/2-y, orbit_->evaluator.currentParams.c.im);
+  orbit_->evaluator.currentParams.epoch=epoch;
+  orbit_->evaluator.currentParams.pixelIndex=0;
+  orbit_->pointData.zero(&orbit_->evaluator.currentParams.c);
+  /*MandelMath::complex base(orbit.worker, &params.base_re_s_, &params.base_im_s, true);
+  currentWorker->assign(&orbit.evaluator.currentData.root_re, &orbit.evaluator.currentParams.c_re);
   orbit.worker->assign(&orbit.evaluator.currentData.root_im, &orbit.evaluator.currentParams.c_im);
-  MandelMath::complex root(orbit.worker, &orbit.evaluator.currentData.root_re, &orbit.evaluator.currentData.root_im, true);
-  orbit.evaluator.newton(params.period, &base, &root, true, 12);
+  MandelMath::complex root(orbit.worker, &orbit.evaluator.currentData.root_re, &orbit.evaluator.currentData.root_im, true);*/
+  orbit_->evaluator.newton(params_->period, &params_->base, &orbit_->evaluator.currentData.root, true, 12);
   //orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
-  orbit.pointData.iter=orbit.evaluator.newtres_.cyclesNeeded;
-  orbit.pointData.firstM=orbit.evaluator.newtres_.firstMum_re_;
-  orbit.worker->assign(&orbit.pointData.fz_r_re, &orbit.evaluator.newtres_.fz_r_re_);
-  orbit.worker->add_double(&orbit.pointData.fz_r_re, 1);
-  orbit.worker->assign(&orbit.pointData.fz_r_im, &orbit.evaluator.newtres_.fz_r_im_);
-  orbit.pointData.naiveChoice=orbit.evaluator.newtres_.naiveChoice;
-  orbit.first_mu_re_=orbit.evaluator.newtres_.firstMu_re_;
-  orbit.first_mu_im=orbit.evaluator.newtres_.firstMu_im;
-  orbit.first_mum_re_=orbit.evaluator.newtres_.firstMum_re_;
-  orbit.first_mum_im_=orbit.evaluator.newtres_.firstMum_im_;
+  orbit_->pointData.store->iter=orbit_->evaluator.newtres_.cyclesNeeded;
+  orbit_->pointData.store->firstM=orbit_->evaluator.newtres_.firstMum_re_;
+  orbit_->pointData.fz_r.assign(&orbit_->evaluator.newtres_.fz_r);
+  currentWorker_->add_double(orbit_->pointData.fz_r.re, 1);
+  orbit_->pointData.store->naiveChoice=orbit_->evaluator.newtres_.naiveChoice;
+  orbit_->first_mu_re_=orbit_->evaluator.newtres_.firstMu_re_;
+  orbit_->first_mu_im=orbit_->evaluator.newtres_.firstMu_im;
+  orbit_->first_mum_re_=orbit_->evaluator.newtres_.firstMum_re_;
+  orbit_->first_mum_im_=orbit_->evaluator.newtres_.firstMum_im_;
 
   int circ_x, circ_y;
   double tmp_re, tmp_im;
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0xff, 0xff, 0)); //final=yellow /
-  position.worker->sub(root.re_s, &position.center_re_s);
-  position.worker->lshift(root.re_s, position.step_log);
-  circ_x=position.worker->toDouble(root.re_s)+imageWidth/2;
-  position.worker->sub(root.im_s, &position.center_im_s);
-  position.worker->lshift(root.im_s, position.step_log);
-  circ_y=imageHeight/2-position.worker->toDouble(root.im_s);
+  reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.currentData.root, &tmp);
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawLine(circ_x-2, circ_y+2, circ_x+2, circ_y-2);
     //size of r that maps to 1 epsilon: about the width of transition from >0 to <0
-    int circ_r=ldexp(sqrt(orbit.evaluator.newtres_.accy_tostop*orbit.worker->eps2()), position.step_log);
+    int circ_r=ldexp(sqrt(orbit_->evaluator.newtres_.accy_tostop*currentWorker_->eps2()), position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
       painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
     //size of r that maps to a few epsilon: the accuracy of root and also size of the dead pool
-    circ_r=ldexp(sqrt((orbit.evaluator.newtres_.accy_tostop*orbit.evaluator.newtres_.accy_multiplier)*orbit.worker->eps2()), position.step_log);
+    circ_r=ldexp(sqrt((orbit_->evaluator.newtres_.accy_tostop*orbit_->evaluator.newtres_.accy_multiplier)*currentWorker_->eps2()), position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
       painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
   };
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0xff, 0, 0xff)); //Newton=purple \      .
-  position.worker->sub(&orbit.evaluator.newtres_.first_guess_newt_re, &position.center_re_s);
-  position.worker->lshift(&orbit.evaluator.newtres_.first_guess_newt_re, position.step_log);
-  circ_x=position.worker->toDouble(&orbit.evaluator.newtres_.first_guess_newt_re)+imageWidth/2;
-  position.worker->sub(&orbit.evaluator.newtres_.first_guess_newt_im, &position.center_im_s);
-  position.worker->lshift(&orbit.evaluator.newtres_.first_guess_newt_im, position.step_log);
-  circ_y=imageHeight/2-position.worker->toDouble(&orbit.evaluator.newtres_.first_guess_newt_im);
+  reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.newtres_.first_guess_newt, &tmp);
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -676,11 +611,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush); //white = is better visible than cyan | so paint it under
   painter.setPen(QColor(0xff, 0xff, 0xff)); //Fejer=white =
-  tmp_re=orbit.evaluator.newtres_.first_fejer_re-position.worker->toDouble(&position.center_re_s);
-  tmp_re=ldexp(tmp_re, position.step_log);
+  tmp_re=orbit_->evaluator.newtres_.first_fejer_re-currentWorker_->toDouble(position_->center.re);
+  tmp_re=ldexp(tmp_re, position_->step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit.evaluator.newtres_.first_fejer_im-position.worker->toDouble(&position.center_im_s);
-  tmp_im=ldexp(tmp_im, position.step_log);
+  tmp_im=orbit_->evaluator.newtres_.first_fejer_im-currentWorker_->toDouble(position_->center.im);
+  tmp_im=ldexp(tmp_im, position_->step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -691,33 +626,33 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush); //
   painter.setPen(QColor(0xff, 0x00, 0x00)); //Naive=red o
-  tmp_re=orbit.evaluator.newtres_.first_naive1_re_-position.worker->toDouble(&position.center_re_s);
-  tmp_re=ldexp(tmp_re, position.step_log);
+  tmp_re=orbit_->evaluator.newtres_.first_naive1_re_-currentWorker_->toDouble(position_->center.re);
+  tmp_re=ldexp(tmp_re, position_->step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit.evaluator.newtres_.first_naive1_im-position.worker->toDouble(&position.center_im_s);
-  tmp_im=ldexp(tmp_im, position.step_log);
+  tmp_im=orbit_->evaluator.newtres_.first_naive1_im-currentWorker_->toDouble(position_->center.im);
+  tmp_im=ldexp(tmp_im, position_->step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawEllipse(circ_x-2, circ_y-2, 2*2, 2*2);
   };
-  tmp_re=orbit.evaluator.newtres_.first_naive2_re-position.worker->toDouble(&position.center_re_s);
-  tmp_re=ldexp(tmp_re, position.step_log);
+  tmp_re=orbit_->evaluator.newtres_.first_naive2_re-currentWorker_->toDouble(position_->center.re);
+  tmp_re=ldexp(tmp_re, position_->step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit.evaluator.newtres_.first_naive2_im-position.worker->toDouble(&position.center_im_s);
-  tmp_im=ldexp(tmp_im, position.step_log);
+  tmp_im=orbit_->evaluator.newtres_.first_naive2_im-currentWorker_->toDouble(position_->center.im);
+  tmp_im=ldexp(tmp_im, position_->step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawEllipse(circ_x-1, circ_y-1, 2*1, 2*1);
   };
-  tmp_re=orbit.evaluator.newtres_.first_naive_re-position.worker->toDouble(&position.center_re_s);
-  tmp_re=ldexp(tmp_re, position.step_log);
+  tmp_re=orbit_->evaluator.newtres_.first_naive_re-currentWorker_->toDouble(position_->center.re);
+  tmp_re=ldexp(tmp_re, position_->step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit.evaluator.newtres_.first_naive_im-position.worker->toDouble(&position.center_im_s);
-  tmp_im=ldexp(tmp_im, position.step_log);
+  tmp_im=orbit_->evaluator.newtres_.first_naive_im-currentWorker_->toDouble(position_->center.im);
+  tmp_im=ldexp(tmp_im, position_->step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -728,12 +663,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0x80, 0xff, 0xff)); //Laguerre=cyan |
-  position.worker->sub(&orbit.evaluator.newtres_.first_guess_lagu_re, &position.center_re_s);
-  position.worker->lshift(&orbit.evaluator.newtres_.first_guess_lagu_re, position.step_log);
-  circ_x=position.worker->toDouble(&orbit.evaluator.newtres_.first_guess_lagu_re)+imageWidth/2;
-  position.worker->sub(&orbit.evaluator.newtres_.first_guess_lagu_im, &position.center_im_s);
-  position.worker->lshift(&orbit.evaluator.newtres_.first_guess_lagu_im, position.step_log);
-  circ_y=imageHeight/2-position.worker->toDouble(&orbit.evaluator.newtres_.first_guess_lagu_im);
+  reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.newtres_.first_guess_lagu, &tmp);
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -742,11 +672,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0x80, 0xff, 0xff)); //Laguerre1=cyan ||
-  tmp_re=orbit.evaluator.newtres_.first_lagu1_re-position.worker->toDouble(&position.center_re_s);
-  tmp_re=ldexp(tmp_re, position.step_log);
+  tmp_re=orbit_->evaluator.newtres_.first_lagu1_re-currentWorker_->toDouble(position_->center.re);
+  tmp_re=ldexp(tmp_re, position_->step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit.evaluator.newtres_.first_lagu1_im-position.worker->toDouble(&position.center_im_s);
-  tmp_im=ldexp(tmp_im, position.step_log);
+  tmp_im=orbit_->evaluator.newtres_.first_lagu1_im-currentWorker_->toDouble(position_->center.im);
+  tmp_im=ldexp(tmp_im, position_->step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -757,11 +687,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0x80, 0xff, 0xff)); //Laguerre1other=cyan o
-  tmp_re=orbit.evaluator.newtres_.first_lagu1o_re-position.worker->toDouble(&position.center_re_s);
-  tmp_re=ldexp(tmp_re, position.step_log);
+  tmp_re=orbit_->evaluator.newtres_.first_lagu1o_re-currentWorker_->toDouble(position_->center.re);
+  tmp_re=ldexp(tmp_re, position_->step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit.evaluator.newtres_.first_lagu1o_im-position.worker->toDouble(&position.center_im_s);
-  tmp_im=ldexp(tmp_im, position.step_log);
+  tmp_im=orbit_->evaluator.newtres_.first_lagu1o_im-currentWorker_->toDouble(position_->center.im);
+  tmp_im=ldexp(tmp_im, position_->step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -771,21 +701,21 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
-  if (orbit.evaluator.newtres_.first_neumaier1_im_!=0)
+  if (orbit_->evaluator.newtres_.first_neumaier1_im_!=0)
   {
     painter.setPen(QColor(0xff, 0x00, 0x00)); //Neumaier1_im
-    int circ_r=ldexp(abs(orbit.evaluator.newtres_.first_neumaier1_im_), position.step_log);
+    int circ_r=ldexp(abs(orbit_->evaluator.newtres_.first_neumaier1_im_), position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
     };
   };
-  if ((orbit.evaluator.newtres_.first_neumaier1_im_!=0) || (orbit.evaluator.newtres_.first_neumaier1_re_<0))
+  if ((orbit_->evaluator.newtres_.first_neumaier1_im_!=0) || (orbit_->evaluator.newtres_.first_neumaier1_re_<0))
   {
     painter.setPen(QColor(0xff, 0x00, 0xff)); //Neumaier1_mag
-    double mag=sqrt(orbit.evaluator.newtres_.first_neumaier1_re_*orbit.evaluator.newtres_.first_neumaier1_re_+
-                    orbit.evaluator.newtres_.first_neumaier1_im_*orbit.evaluator.newtres_.first_neumaier1_im_);
-    int circ_r=ldexp(mag, position.step_log);
+    double mag=sqrt(orbit_->evaluator.newtres_.first_neumaier1_re_*orbit_->evaluator.newtres_.first_neumaier1_re_+
+                    orbit_->evaluator.newtres_.first_neumaier1_im_*orbit_->evaluator.newtres_.first_neumaier1_im_);
+    int circ_r=ldexp(mag, position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -794,7 +724,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   else
   {
     painter.setPen(QColor(0xff, 0xff, 0xff)); //Neumaier1
-    int circ_r=ldexp(orbit.evaluator.newtres_.first_neumaier1_re_, position.step_log);
+    int circ_r=ldexp(orbit_->evaluator.newtres_.first_neumaier1_re_, position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -802,22 +732,22 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   }
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
-  if (orbit.evaluator.newtres_.first_neumaier2_im!=0)
+  if (orbit_->evaluator.newtres_.first_neumaier2_im!=0)
   {
     painter.setPen(QColor(0xff, 0x00, 0x00)); //Neumaier2_im
-    int circ_r=ldexp(abs(orbit.evaluator.newtres_.first_neumaier2_im), position.step_log);
+    int circ_r=ldexp(abs(orbit_->evaluator.newtres_.first_neumaier2_im), position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
       painter.drawEllipse(x-circ_r-2, y-circ_r-2, 2*circ_r+4, 2*circ_r+4);
     };
   };
-  if ((orbit.evaluator.newtres_.first_neumaier2_im!=0) || (orbit.evaluator.newtres_.first_neumaier2_re<0))
+  if ((orbit_->evaluator.newtres_.first_neumaier2_im!=0) || (orbit_->evaluator.newtres_.first_neumaier2_re<0))
   {
     painter.setPen(QColor(0xff, 0x00, 0xff)); //Neumaier2_mag
-    double mag=sqrt(orbit.evaluator.newtres_.first_neumaier2_re*orbit.evaluator.newtres_.first_neumaier2_re+
-                    orbit.evaluator.newtres_.first_neumaier2_im*orbit.evaluator.newtres_.first_neumaier2_im);
-    int circ_r=ldexp(mag, position.step_log);
+    double mag=sqrt(orbit_->evaluator.newtres_.first_neumaier2_re*orbit_->evaluator.newtres_.first_neumaier2_re+
+                    orbit_->evaluator.newtres_.first_neumaier2_im*orbit_->evaluator.newtres_.first_neumaier2_im);
+    int circ_r=ldexp(mag, position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -827,7 +757,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   else
   {
     painter.setPen(QColor(0xff, 0xff, 0xff)); //Neumaier2
-    int circ_r=ldexp(orbit.evaluator.newtres_.first_neumaier2_re, position.step_log);
+    int circ_r=ldexp(orbit_->evaluator.newtres_.first_neumaier2_re, position_->step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -844,41 +774,35 @@ void LaguerreModel::writeToImage(ShareableImageWrapper image)
   //QImage result(imageWidth, imageHeight, QImage::Format::Format_ARGB32);//setPixel in _Premultiplied affects surrounding pixels?! _Premultiplied);
   if (image.image->isNull() || (image.image->width()!=imageWidth) || (image.image->height()!=imageHeight))
     return;
-  /*MandelMath::number_store point_re;
-  MandelMath::number_store point_im;
-  position.worker->init(&point_re);
-  position.worker->init(&point_im);
-  MandelMath::complex tmp_point(position.worker, &point_re, &point_im, false);*/
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
       bool knownenum=false;
-      LaguerrePoint *data=&pointStore[y*imageWidth+x];
-      /*position.pixelXtoRE(x-imageWidth/2, tmp_point.re_s);
-      position.pixelYtoIM(imageHeight/2-y, tmp_point.im_s);*/
+      MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (y*imageWidth+x)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+      LaguerrePoint data_(&pointStore_[y*imageWidth+x], &allo);
       //if ((x==222) && (y==170))
         //data->state=MandelPoint::State::stOutside;
       switch (_selectedPaintStyle)
       {
         case paintStyle::paintStyleCls:
         {
-          switch (data->state)
+          switch (data_.store->state)
           {
-            case LaguerrePoint::State::stUnknown:
+            case LaguerrePointStore::State::stUnknown:
               //image.image->setPixel(x, y, 0xffffffff);
               image.image->setPixel(x, y, 0xff000000);
               knownenum=true;
               break;
-            case LaguerrePoint::State::stResolved:
+            case LaguerrePointStore::State::stResolved:
             {
-              if (data->iter==0)
+              if (data_.store->iter==0)
                 image.image->setPixel(x, y, 0xff606060); //the dead pool
               else
               {
                 int r;
                 {
-                  double tr=position.worker->toDouble(&data->fz_r_re);
-                  double ti=position.worker->toDouble(&data->fz_r_im);
+                  double tr=currentWorker_->toDouble(data_.fz_r.re);
+                  double ti=currentWorker_->toDouble(data_.fz_r.im);
                   if (tr*tr+ti*ti>1)
                     r=0xc0;
                   else
@@ -897,20 +821,20 @@ void LaguerreModel::writeToImage(ShareableImageWrapper image)
                   g=0x00+0x40*(data->firstM+1);
                 else
                   g=0xdf;*/
-                if (data->firstM>=3)
+                if (data_.store->firstM>=3)
                   g=0x7f;
-                else if (data->firstM>=2)
-                  g=0xbf-0x40*(data->firstM-2);
-                else if (data->firstM>=1)
-                  g=0xff-0x40*(data->firstM-1);
-                else if (data->firstM>=0)
-                  g=0x00+0x40*(data->firstM-0);
-                else if (data->firstM>=-1)
-                  g=0x40+0x40*(data->firstM+1);
+                else if (data_.store->firstM>=2)
+                  g=0xbf-0x40*(data_.store->firstM-2);
+                else if (data_.store->firstM>=1)
+                  g=0xff-0x40*(data_.store->firstM-1);
+                else if (data_.store->firstM>=0)
+                  g=0x00+0x40*(data_.store->firstM-0);
+                else if (data_.store->firstM>=-1)
+                  g=0x40+0x40*(data_.store->firstM+1);
                 else
                   g=0x80;
                 int b;
-                switch (data->iter % 5)
+                switch (data_.store->iter % 5)
                 {
                   case  0: b=0x00; break;
                   case  1: b=0xff; break;
@@ -923,7 +847,7 @@ void LaguerreModel::writeToImage(ShareableImageWrapper image)
               }
               knownenum=true;
             } break;
-            case LaguerrePoint::State::stFail:
+            case LaguerrePointStore::State::stFail:
             {
               image.image->setPixel(x, y, 0xffffffff);
               knownenum=true;
@@ -944,19 +868,21 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
   {
     retryEffortFrom=-1;
     int quickrun=0;
-    MandelMath::complex tmpc(position.worker, &params.base_re_s_, &params.base_im_s, true);
-    MandelMath::complex root(position.worker, &evaluator->currentData.f_re, &evaluator->currentData.f_im, true);
+    MandelMath::complex &tmpc=params_->base;//will assign to currentParams.c (position.worker, &params.base_re_s_, &params.base_im_s, true);
+    MandelMath::complex &root=evaluator->currentData.f;//(position.worker, &evaluator->currentData.f_re, &evaluator->currentData.f_im, true);
     for (int pi=0; pi<imageWidth*imageHeight; pi++)
     {
       int pointIndex=(lastGivenPointIndex_+pi)%(imageWidth*imageHeight);
       //if ((lastGivenPointIndex_!=0) && (pointIndex==0))
         //dbgPoint();
-      LaguerrePoint *pointData=&pointStore[pointIndex];
-      if (pointData->state==LaguerrePoint::State::stUnknown)
+      MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), pointIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+      LaguerrePoint pointData_(&pointStore_[pointIndex], &allo);
+      bool needsEval=(pointData_.store->state==LaguerrePointStore::State::stUnknown);
+      if (needsEval)
       {
         bool found=false;
         for (int t=0; t<threadCount; t++)
-          if (threads[t].currentParams.pixelIndex==pointIndex)
+          if (threads[t]->currentParams.pixelIndex==pointIndex)
           {
             found=true;
             break;
@@ -966,34 +892,38 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
         assert(evaluator->currentParams.pixelIndex==-1);
         if (!found)
         {
-          int phasex=(pointIndex%imageWidth-imageWidth/2+position.cached_center_re_mod+32768)%32768;
-          int phasey=(pointIndex/imageWidth-imageHeight/2+position.cached_center_im_mod+32768)%32768;
+          int phasex=(pointIndex%imageWidth-imageWidth/2+position_->cached_center_re_mod+32768)%32768;
+          int phasey=(pointIndex/imageWidth-imageHeight/2+position_->cached_center_im_mod+32768)%32768;
           //int effort=ctz16(phasex)+ctz16(phasey);
           int effort=MandelMath::ctz16(phasex | phasey);
           if (effort>8)
             effort=8;
-          if (effort+effortBonus<8)
+          effort+=effortBonus;
+          if (effort<8)
           {
             if (retryEffortFrom<0)
               retryEffortFrom=pointIndex;
           }
           else
           {
-            evaluator->switchType(position.worker);
-            position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, root.re_s);
-            position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, root.im_s);
+            if (evaluator->currentWorker->ntype()!=position_->worker->ntype())
+              dbgPoint();
+            //evaluator->switchType(position.worker);
+            position_->pixelXtoRE(pointIndex%imageWidth - imageWidth/2, root.re);
+            position_->pixelYtoIM(imageHeight/2-pointIndex/imageWidth, root.im);
             evaluator->currentParams.epoch=epoch;
             evaluator->currentParams.pixelIndex=pointIndex;
-            if (params.period>10)
+            if (params_->period>10)
             {
-              evaluator->startNewton(params.period, &tmpc);
+              evaluator->startNewton(params_->period, &tmpc); //evaluator->currentData.f is additional hidden parameter
+              _threadsWorking++;
               evaluator->timeOuter.start();
               lastGivenPointIndex_=pointIndex;
               return;
             }
             else
             {
-              int result=evaluator->newton(params.period, &tmpc, &root, true, 12);
+              int result=evaluator->newton(params_->period, &tmpc, &root, true, 12);
               donePixel1(evaluator, result);
               quickrun++;
               if (quickrun>=100)
@@ -1027,32 +957,33 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
 {
   if ((me->currentParams.epoch==epoch) && (me->currentParams.pixelIndex>=0) && (me->currentParams.pixelIndex<imageWidth*imageHeight))
   {
-    LaguerrePoint *point=&pointStore[me->currentParams.pixelIndex];
+    MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), me->currentParams.pixelIndex*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
+    LaguerrePoint point_(&pointStore_[me->currentParams.pixelIndex], &allo);
+    /*
     if (point->state!=LaguerrePoint::State::stUnknown)
       qDebug()<<"Finished pixel finished again";
-    else
+    else*/
     {
-      if (position.worker==nullptr)
+      if (position_->worker==nullptr)
         dbgPoint();
       else
       {
         if (result>0)
         {
-          point->state=LaguerrePoint::State::stResolved;
+          point_.store->state=LaguerrePointStore::State::stResolved;
         }
         else
         {
           me->newtres_.cyclesNeeded=-1;
-          point->state=LaguerrePoint::State::stFail;
+          point_.store->state=LaguerrePointStore::State::stFail;
         };
         //point->assign(position.worker, me->currentData);
-        position.worker->assign(&point->f_re, &me->currentData.f_re); //root
-        position.worker->assign(&point->f_im, &me->currentData.f_im);
-        position.worker->assign(&point->fz_r_re, &me->newtres_.fz_r_re_);
-        position.worker->add_double(&point->fz_r_re, 1);
-        position.worker->assign(&point->fz_r_im, &me->newtres_.fz_r_im_);
-        point->iter=me->newtres_.cyclesNeeded;
-        point->firstM=me->newtres_.firstMum_re_;
+        //in theory, LaguerrePoint can be assigned from NewtRes; in practice, they are quite different
+        point_.f.assign(&me->currentData.f); //root
+        point_.fz_r.assign(&me->newtres_.fz_r);
+        currentWorker_->add_double(point_.fz_r.re, 1);
+        point_.store->iter=me->newtres_.cyclesNeeded;
+        point_.store->firstM=me->newtres_.firstMum_re_;
       }
     }
   }
@@ -1066,46 +997,147 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
 void LaguerreModel::donePixel(MandelEvaluator *me, int result)
 {
   me->timeOuterTotal+=me->timeOuter.nsecsElapsed();
+  _threadsWorking--;
   donePixel1(me, result);
   giveWork(me);
 }
 
 void LaguerreModel::selectedPrecisionChanged()
 {
-  MandelMath::number_worker::Type oldType;
-  if (position.worker==nullptr)
-    oldType=MandelMath::number_worker::Type::typeEmpty;
-  else
-    oldType=position.worker->ntype();
-  switch (_selectedPrecision)
+  MandelMath::worker_multi *newWorker=nullptr;
+  MandelMath::worker_multi *newStoreWorker=nullptr;
+  MandelMath::worker_multi::Allocator *newStoreAllocator=nullptr;
+  if (currentWorker_!=nullptr)
   {
-    case precisionDouble: setWorker(&position.number_worker_double_template); break;
-    case precisionDDouble: setWorker(&position.number_worker_ddouble_template); break;
-    case precisionQDouble: setWorker(&position.number_worker_ddouble_template); break;
-    case precisionMulti: setWorker(&position.number_worker_multi_template); break;
+    for (int t=threadCount-1; t>=0; t--)
+    {
+      threads[t]->wantStop=true;
+      threads[t]->quit();
+    }
+    for (int t=threadCount-1; t>=0; t--)
+    {
+      threads[t]->wait(1000);
+      delete threads[t];
+    }
+    delete threads;
+    threads=nullptr;
+    //keep old threadCount or we'd have to change worker length threadCount=0;
+
+    //bool empty=imageWidth<=0 || imageHeight<=0; //Qt begins with width=0, height=-13
+    switch (_selectedPrecision)
+    {
+      case precisionDouble:
+        newWorker=new MandelMath::worker_multi_double(currentWorker_->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_double(storeWorker->getAllocator());
+        break;
+#if !ONLY_DOUBLE_WORKER
+      case precisionFloat128:
+        newWorker=new MandelMath::worker_multi_float128(currentWorker_);
+        newStoreWorker=empty?nullptr:new MandelMath::worker_multi_float128(storeWorker);
+        break;
+      case precisionDDouble:
+        newWorker=new MandelMath::worker_multi_ddouble(currentWorker_);
+        newStoreWorker=empty?nullptr:new MandelMath::worker_multi_ddouble(storeWorker);
+        break;
+      case precisionQDouble:
+        newWorker=new MandelMath::worker_multi_qdouble(currentWorker_);
+        newStoreWorker=empty?nullptr:new MandelMath::worker_multi_qdouble(storeWorker);
+        break;
+#endif
+    }
+    newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), imageWidth*imageHeight*LaguerrePoint::LEN);//newStoreWorker->capacity);
   }
-  MandelMath::number_worker::Type newType=position.worker->ntype();
-  if (orbit.worker!=nullptr)
+  else
   {
-    assert(orbit.worker->ntype()==oldType);
-    orbit.pointData.promote(oldType, newType);
-    orbit.evaluator.switchType(position.worker);
-    orbit.worker=position.worker;
-  };
-  params.base_re_s_.promote_(oldType, newType, &params.base_re_p);
-  params.base_im_s.promote_(oldType, newType, &params.base_im_p);
-  params.root_re_s.promote_(oldType, newType, &params.root_re_p);
-  params.root_im_s.promote_(oldType, newType, &params.root_im_p);
+    int pointCount;
+    if (imageWidth<=0 || imageHeight<=0) //Qt begins with width=0, height=-13
+      pointCount=0;
+    else
+      pointCount=imageWidth*imageHeight;
+    if (threadCount!=0)
+      dbgPoint();
+    threadCount=1;//QThread::idealThreadCount()-1;
+    if (threadCount<1)
+      threadCount=1;
+    switch (_selectedPrecision)
+    {
+      case precisionDouble:
+        newWorker=new MandelMath::worker_multi_double(LaguerreModel::LEN+threadCount*MandelEvaluator::LEN);
+        newStoreWorker=new MandelMath::worker_multi_double(pointCount*LaguerrePoint::LEN);
+        break;
+#if !ONLY_DOUBLE_WORKER
+      case precisionFloat128:
+        newWorker=new MandelMath::worker_multi_float128(LaguerreModel::LEN+threadCount*MandelEvaluator::LEN);
+        newStoreWorker=pointCount==0?nullptr:new MandelMath::worker_multi_float128(pointCount*LaguerrePoint::LEN);
+        break;
+      case precisionDDouble:
+        newWorker=new MandelMath::worker_multi_ddouble(LaguerreModel::LEN+threadCount*MandelEvaluator::LEN);
+        newStoreWorker=pointCount==0?nullptr:new MandelMath::worker_multi_ddouble(pointCount*LaguerrePoint::LEN);
+        break;
+      case precisionQDouble:
+        newWorker=new MandelMath::worker_multi_qdouble(LaguerreModel::LEN+threadCount*MandelEvaluator::LEN);
+        newStoreWorker=pointCount==0?nullptr:new MandelMath::worker_multi_qdouble(pointCount*LaguerrePoint::LEN);
+        break;
+#endif
+    }
+    newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), pointCount*LaguerrePoint::LEN);
+  }
+
+  {
+    MandelMath::worker_multi::Allocator *newparamsAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), Params::LEN);
+    Params *newParams=new Params(newparamsAllocator);
+    Position *newPosition=new Position(newWorker->getAllocator());
+    Orbit *newOrbit=new Orbit(newWorker->getAllocator());
+    newParams->assign(params_);
+    newPosition->assign(position_); //if old is nullptr, sets default view
+    delete orbit_;
+    delete position_;
+    delete params_;
+    delete paramsAllocator;
+    paramsAllocator=newparamsAllocator;
+    params_=newParams;
+    position_=newPosition;
+    orbit_=newOrbit;
+  }
+
+  threads=new MandelEvaluator *[threadCount];
+  for (int t=0; t<threadCount; t++)
+  {
+    threads[t]=new MandelEvaluator(newWorker->getAllocator(), nullptr);
+    //threads[t].setHint(t);
+    QObject::connect(threads[t], &MandelEvaluator::doneNewton,
+                     this, &LaguerreModel::donePixel,
+                     Qt::ConnectionType::QueuedConnection);
+  }
+
+  delete currentWorker_;
+  delete storeAllocator;
+  delete storeWorker;
+  currentWorker_=newWorker;
+  storeWorker=newStoreWorker;
+  storeAllocator=newStoreAllocator;
+
+  startNewEpoch();
 }
 
-LaguerreModel::Position::Position():
-  worker(nullptr),
-  center_re_s(),
-  center_im_s()
+LaguerreModel::Params::Params(MandelMath::worker_multi::Allocator *allocator):
+  period(1), base(allocator), root(allocator)
 {
-  setNumberType(MandelMath::number_worker::Type::typeDouble);
-  worker->zero(&center_re_s, -0.5);
-  worker->zero(&center_im_s, 0.0);
+
+}
+
+void LaguerreModel::Params::assign(Params *src)
+{
+  if (src)
+  {
+    period=src->period;
+  };
+}
+
+LaguerreModel::Position::Position(MandelMath::worker_multi::Allocator *allocator):
+  worker(allocator->worker), center(allocator)
+{
+  center.zero(-0.5, 0.0);
   step_log=7;
   step_size__=1.0/128;
   updateCachedDepth();
@@ -1113,74 +1145,43 @@ LaguerreModel::Position::Position():
 
 LaguerreModel::Position::~Position()
 {
-  if (worker!=nullptr)
-  {
-    worker->cleanup(&center_re_s);
-    worker->cleanup(&center_im_s);
-  };
-}
-
-void LaguerreModel::Position::setNumberType(MandelMath::number_worker::Type ntype)
-{
-  MandelMath::number_worker::Type oldType;
-  if (worker!=nullptr)
-    oldType=worker->ntype();
-  else
-    oldType=MandelMath::number_worker::Type::typeEmpty;
-  center_re_s.promote_(oldType, ntype, &center_re_p);
-  center_im_s.promote_(oldType, ntype, &center_im_p);
   /*if (worker!=nullptr)
   {
     worker->cleanup(&center_re_s);
     worker->cleanup(&center_im_s);
-  }*/
-  switch (ntype)
-  {
-#if NUMBER_DOUBLE_EXISTS
-    case MandelMath::number_worker::Type::typeDouble:
-      worker=&number_worker_double_template;
-      break;
-#endif //NUMBER_DOUBLE_EXISTS
-    case MandelMath::number_worker::Type::typeDDouble:
-      worker=&number_worker_ddouble_template;
-      break;
-    case MandelMath::number_worker::Type::typeMulti:
-      worker=&number_worker_multi_template;
-      break;
-    case MandelMath::number_worker::Type::typeEmpty:
-      worker=nullptr;
-  }
-  /*if (worker)
-  {
-    worker->init(&center_re_s);
-    worker->init(&center_im_s);
   };*/
 }
 
-void LaguerreModel::Position::setView(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale)
+void LaguerreModel::Position::assign(Position *src)
+{
+  if (src!=nullptr)
+  {
+    step_log=src->step_log;
+    step_size__=src->step_size__;
+  }
+}
+
+void LaguerreModel::Position::setView(const MandelMath::complex *c, double scale)
 {
   step_log=-ilogb(scale);
   step_size__=ldexp(1.0, -step_log);
   //worker->zero(&center_re_s, ldexp(round(ldexp(c_re, step_log)), -step_log));
-  worker->zero(&center_re_s); //worker->swap()
-  worker->assign(&center_re_s, c_re);
-  worker->lshift(&center_re_s, step_log);
-  worker->round(&center_re_s);
-  worker->lshift(&center_re_s, -step_log);
+  //worker->zero(&center_re_s); //worker->swap()
+  center.assign(c);
+  center.lshift(step_log);
+  worker->round(center.re);
+  worker->round(center.im);
+  center.lshift(-step_log);
   //worker->zero(&center_im_s, ldexp(round(ldexp(c_im, step_log)), -step_log));
-  worker->zero(&center_im_s); //worker->swap()
-  worker->assign(&center_im_s, c_im);
-  worker->lshift(&center_im_s, step_log);
-  worker->round(&center_im_s);
-  worker->lshift(&center_im_s, -step_log);
+  //worker->zero(&center_im_s); //worker->swap()
   updateCachedDepth();
 }
 
 void LaguerreModel::Position::move(int delta_x, int delta_y)
 {
   //qDebug()<<"move ("<<delta_x<<","<<delta_y<<")";
-  worker->add_double(&center_re_s, -delta_x*step_size__);
-  worker->add_double(&center_im_s, +delta_y*step_size__);
+  worker->add_double(center.re, -delta_x*step_size__);
+  worker->add_double(center.im, +delta_y*step_size__);
   cached_center_re_mod=(cached_center_re_mod-delta_x+32768)%32768;
   cached_center_im_mod=(cached_center_im_mod+delta_y+32768)%32768;
   int ccrm=cached_center_re_mod;
@@ -1212,8 +1213,8 @@ void LaguerreModel::Position::scale(int inlog, int center_x, int center_y)
     {
       step_size__/=2;
     }
-    worker->add_double(&center_re_s, center_x*(old_step_size-step_size__));
-    worker->add_double(&center_im_s, center_y*(old_step_size-step_size__));
+    worker->add_double(center.re, center_x*(old_step_size-step_size__));
+    worker->add_double(center.im, center_y*(old_step_size-step_size__));
     //center_re/step_size=center_re/old_step_size*old_step_size/step_size+center_x*(old_step_size-step_size)/step_size;
     cached_center_re_mod=cached_center_re_mod*(1<<inlog)+center_x*((1<<inlog)-1);
     cached_center_re_mod&=0x7fff;//=(cached_center_re_mod+32768)%32768;
@@ -1239,8 +1240,8 @@ void LaguerreModel::Position::scale(int inlog, int center_x, int center_y)
     {
       step_size__*=2;
     }
-    worker->add_double(&center_re_s, (center_x-adjust_x)*(old_step_size-step_size__)); //(old_step_size-step_size__)=(1-(1<<-inlog))*old_step_size
-    worker->add_double(&center_im_s, (center_y-adjust_y)*(old_step_size-step_size__));
+    worker->add_double(center.re, (center_x-adjust_x)*(old_step_size-step_size__)); //(old_step_size-step_size__)=(1-(1<<-inlog))*old_step_size
+    worker->add_double(center.im, (center_y-adjust_y)*(old_step_size-step_size__));
     //need to roll in high bits anyway
     /*cached_center_re_mod=cached_center_re_mod*(old_step_size/step_size)+(center_x-adjust_y)*(old_step_size/step_size-1);
     cached_center_re_mod%=32768;
@@ -1252,42 +1253,45 @@ void LaguerreModel::Position::scale(int inlog, int center_x, int center_y)
 
 void LaguerreModel::Position::updateCachedDepth()
 {
-  //number_any d_re_n(MandelMath::number_store::DbgType::typeEmpty, &d_re_s);
-  MandelMath::number_store d_re_s;
-  MandelMath::number_place d_re_p;
-  worker->init_(&d_re_s, &d_re_p);
-  worker->assign(&d_re_s, &center_re_s);
-  worker->lshift(&d_re_s, step_log-15);
-  worker->mod1(&d_re_s);
-  worker->lshift(&d_re_s, 15);
-  cached_center_re_mod=worker->toRound(&d_re_s);
-  worker->cleanup(&d_re_s);
+  MandelMath::complex d(worker);
 
-  MandelMath::number_store d_im_s;
-  MandelMath::number_place d_im_p;
-  worker->init_(&d_im_s, &d_im_p);
-  worker->assign(&d_im_s, &center_im_s);
-  worker->lshift(&d_im_s, step_log-15);
-  worker->mod1(&d_im_s);
-  worker->lshift(&d_im_s, 15);
-  cached_center_im_mod=worker->toRound(&d_im_s);
-  worker->cleanup(&d_im_s);
+  d.assign(&center);
+  d.lshift(step_log-15);
+  worker->mod1(d.re);
+  worker->mod1(d.im);
+  d.lshift(15);
+  cached_center_re_mod=worker->toRound(d.re);
+  cached_center_im_mod=worker->toRound(d.im);
 }
 
-void LaguerreModel::Position::pixelXtoRE(int x, MandelMath::number_store *result)
+void LaguerreModel::Position::pixelXtoRE(int x, MandelMath::number_pointer result)
 {
   //return (x - imageWidth/2)*position.step_size+position.center_re;
   //should be already result->reinit(center_re_n.ntype());
-  worker->assign(result, &center_re_s);
+  worker->assign(result, center.re);
   worker->add_double(result, x*step_size__);
 }
 
-void LaguerreModel::Position::pixelYtoIM(int y, MandelMath::number_store *result)
+void LaguerreModel::Position::pixelYtoIM(int y, MandelMath::number_pointer result)
 {
   //return (y - imageHeight/2)*position.step_size+position.center_im;
   //should be already result->reinit(center_im_n.ntype());
-  worker->assign(result, &center_im_s);
+  worker->assign(result, center.im);
   worker->add_double(result, y*step_size__);
 }
 
+
+
+LaguerreModel::Orbit::Orbit(MandelMath::worker_multi::Allocator *allocator): currentWorker(allocator->worker),
+  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator, nullptr),
+  pointAllocator(allocator, LaguerrePoint::LEN), pointDataStore(), pointData(&pointDataStore, &pointAllocator),
+  first_mu_re_(0), first_mu_im(0), first_mum_re_(0), first_mum_im_(0)
+{
+
+}
+
+LaguerreModel::Orbit::~Orbit()
+{
+
+}
 

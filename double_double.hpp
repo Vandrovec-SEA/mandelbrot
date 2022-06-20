@@ -19,28 +19,30 @@ public:
   double hi;
   double lo_; // !!can have other sign than hi!!
   void assign(const dd_real &src) { hi=src.hi; lo_=src.lo_; }
+  void zero(double v) { hi=v; lo_=0; }
   void chs() { hi=-hi; lo_=-lo_; }
   void lshift(int exp); //*=2^exp
   void add_double(double h2);
   void mul_double(double h2);
-  void add(double h2, double l2);
+  void add(double h2, double l2); //TODO: -> add(dd_real)
   void mul(double h2, double l2);
   void sqr();
-  double radixfloor(); //nearest smaller power of 2 (1.5->1->1)
+  double radixfloor() const; //nearest smaller power of 2 (1.5->1->1)
   void recip();
   void sqrt();
   void round();
   void frac();
   void mod1();
-  int compare(const dd_real *other); //return -1 if <, 0 if =, +1 if >
-  bool isequal(const dd_real *other);
-  bool is0();
-  bool isle(const dd_real *other);
-  bool isle0();
-  bool isl0();
-  bool isl1();
+  int compare(const dd_real *other) const; //return -1 if <, 0 if =, +1 if >
+  bool isequal(const dd_real *other) const;
+  bool is0() const;
+  bool isle(const dd_real *other) const;
+  bool isle0() const;
+  bool isl0() const;
+  bool isl1() const;
 
   inline void checksigns();
+  //explicit operator double();
 };
 
 } // namespace MandelMath

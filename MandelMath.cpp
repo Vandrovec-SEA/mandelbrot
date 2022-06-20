@@ -18,6 +18,8 @@ void dbgPoint()
   doNothing(x);
 }
 
+template <typename Tout, typename Tin> //typechecked hard cast
+Tout specific_cast(Tin in) { return (Tout)in; }
 
 
 namespace MandelMath {
@@ -245,6 +247,63 @@ int ctz16(int x)
   return result;
 }*/
 
+worker_multi::Allocator::Allocator(int capacity):
+  lowest(0), allocUpTo(0), capacity(capacity), above(nullptr), worker(nullptr)
+{
+}
+
+worker_multi::Allocator::Allocator(worker_multi *worker, int capacity, MandelMath::upgrademe *):
+  lowest(0), allocUpTo(0), capacity(capacity), above(nullptr), worker(worker)
+{
+}
+
+worker_multi::Allocator::Allocator(Allocator *allo, int capacity):
+  lowest(allo->allocUpTo), allocUpTo(allo->allocUpTo), capacity(capacity), above(allo), worker(allo->worker)
+{
+  allo->allocUpTo+=capacity;
+  assert(allo->allocUpTo<=allo->lowest+allo->capacity);
+}
+
+worker_multi::Allocator::Allocator(Allocator *allo, int lowest, int count, upgrademe *):
+  lowest(allo->lowest+lowest), allocUpTo(allo->lowest+lowest), capacity(count), above(nullptr), worker(allo->worker)
+{
+  assert(lowest>=allo->lowest);
+  assert(lowest+capacity<=allo->allocUpTo);
+}
+
+worker_multi::Allocator::~Allocator()
+{
+   assert(allocUpTo==lowest);
+   if (above!=nullptr)
+   {
+     assert(above->allocUpTo==lowest+capacity);
+     assert(above->allocUpTo-above->lowest>=capacity);
+     above->allocUpTo-=capacity;
+   };
+}
+
+number_pointer worker_multi::Allocator::alloc()
+{
+  if (worker==nullptr) //support for Qt that requires parameter-less constructors for ShareableViewInfo
+    return number_pointer();
+  assert(allocUpTo<lowest+capacity);
+  allocUpTo++;
+  return worker->getNumber(allocUpTo-1);
+}
+
+void worker_multi::Allocator::dealloc(number_pointer ptr)
+{
+  if (worker==nullptr) //support for Qt that requires parameter-less constructors for ShareableViewInfo
+    return;
+  assert(allocUpTo>lowest);
+  number_pointer expected=worker->getNumber(allocUpTo-1);
+  allocUpTo--;
+  assert(expected.asf64==ptr.asf64);
+}
+
+
+
+#if 0
 number_store::number_store(): dbgType(number_worker::Type::typeEmpty)
 {
   static_assert(sizeof(dd_real)==2*sizeof(double), "dd_real suspiciously big");
@@ -517,227 +576,248 @@ void number_store::assignTo_multi(number_store &other)
   *other.as.multi_.bytes=*as.multi_.bytes;
 }
 */
-
-
+#endif
 
 #if NUMBER_DOUBLE_EXISTS
-void number_worker_double::init_(number_store *store, void *placement, double val)
+//worker_multi_double::worker_multi_double(worker_multi *source):
+worker_multi_double::worker_multi_double(Allocator *source):
+  worker_multi(Type::typeDouble, specific_cast<worker_multi_double *, worker_multi *>(source->worker)->capacity)
 {
-  store->init_(number_worker::Type::typeDouble, placement, val);
+  int oldfirst, oldlast;
+  source->_getRange(oldfirst, oldlast);
+  storage=new double[oldlast-oldfirst];
+  switch (source->worker->ntype())
+  {
+    case Type::typeEmpty:
+    {
+      for (int i=0; i<capacity; i++)
+        storage[i]=0;
+    } break;
+    case Type::typeDouble:
+    {
+      double *src_storage=specific_cast<worker_multi_double *, worker_multi *>(source->worker)->storage;
+      //TODO: memmove but we'll see later
+      for (int i=0; i<capacity; i++)
+        storage[i]=src_storage[oldfirst+i];
+    } break;
+#if !ONLY_DOUBLE_WORKER
+    case Type::typeFloat128:
+    {
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=*((worker_multi_double *)source)->getNumber(i).asf128;
+      }
+    } break;
+    case Type::typeDDouble:
+    {
+      //dd_real *src_storage=((worker_multi_ddouble *)source)->storage;
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=((worker_multi_double *)source)->getNumber(i).asdd->hi;
+      }
+    } break;
+    case Type::typeQDouble:
+    {
+      //dd_real *src_storage=((worker_multi_ddouble *)source)->storage;
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=((worker_multi_double *)source)->getNumber(i).asdq->hi;
+      }
+    } break;
+#endif
+  }
 }
 
-void number_worker_double::zero(number_store *store, double val)
+worker_multi_double::~worker_multi_double()
 {
-  store->zero(number_worker::Type::typeDouble, val);
+  delete[] storage;
+  storage=nullptr;
 }
 
-void number_worker_double::swap(number_store *store, number_store *src)
+number_pointer worker_multi_double::getNumber(int index)
 {
-  assert(store);
-  assert(src);
-  assert(store->dbgType==Type::typeEmpty);
-  assert(src->dbgType==Type::typeDouble);
-  store->as.doubl=src->as.doubl;
-  store->dbgType=Type::typeDouble;
-  src->dbgType=Type::typeEmpty;
+  assert(allocator.checkIndex(index));
+  assert(index>=0 && index<capacity);
+  return number_pointer(&storage[index]);
 }
 
-void number_worker_double::assign(number_store *store, const number_store *src)
+void worker_multi_double::getTmp12(number_pointer &t1, number_pointer &t2)
 {
-  assert(store);
-  assert(src);
-  assert(store->dbgType==Type::typeDouble);
-  assert(src->dbgType==Type::typeDouble);
-  store->as.doubl=src->as.doubl;
+  t1.asf64=&tmp1;
+  t2.asf64=&tmp2;
 }
 
-void number_worker_double::chs(number_store *store)
+void worker_multi_double::assign_block(int dst, worker_multi *src_worker, int src, int len)
 {
-  assert(store->dbgType==Type::typeDouble);
-  store->as.doubl=-store->as.doubl;
+  assert(src_worker->ntype()==Type::typeDouble);
+  worker_multi_double *access=(worker_multi_double *)src_worker;
+  assert(allocator.checkIndex(dst));
+  assert(allocator.checkIndex(dst+len-1));
+  assert(access->allocator.checkIndex(src));
+  assert(access->allocator.checkIndex(src+len-1));
+  assert(dst>=0 && dst+len<=capacity);
+  assert(src>=0 && src+len<=access->capacity);
+
+  for (int i=0; i<len; i++)
+    storage[dst+i]=access->storage[src+i];
 }
 
-void number_worker_double::lshift(number_store *store, int shoft)
+void worker_multi_double::zero(const number_pointer store, double val)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl=ldexp(store->as.doubl, shoft);
-  /*if (shoft>0)
-    store->as.doubl*=two_pow_n(shoft);
-  else if (shoft<0)
-    store->as.doubl/=two_pow_n(-shoft);*/
+  *store.asf64=val;
 }
 
-void number_worker_double::round(number_store *store)
+void worker_multi_double::assign(const number_pointer store, const number_pointer_c src)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl=std::round(store->as.doubl);
+  *store.asf64=*src.asf64;
 }
 
-void number_worker_double::frac(number_store *store)
+void worker_multi_double::chs(const number_pointer store)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  if (store->as.doubl<0)
-    store->as.doubl-=ceil(store->as.doubl);
+  *store.asf64 = -*store.asf64;
+}
+
+void worker_multi_double::lshift(const number_pointer store, int shoft)
+{
+  *store.asf64=ldexp(*store.asf64, shoft);
+}
+
+void worker_multi_double::round(const number_pointer store)
+{
+  *store.asf64=std::round(*store.asf64);
+}
+
+void worker_multi_double::frac(const number_pointer store)
+{
+  if (*store.asf64<0)
+    *store.asf64 -= ceil(*store.asf64);
   else
-    store->as.doubl-=floor(store->as.doubl);
+    *store.asf64 -= floor(*store.asf64);
 }
 
-void number_worker_double::mod1(number_store *store)
+void worker_multi_double::mod1(const number_pointer store)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl-=floor(store->as.doubl);
+  *store.asf64 -= floor(*store.asf64);
 }
 
-void number_worker_double::add_double(number_store *store, double x)
+void worker_multi_double::add_double(const number_pointer store, double x)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl+=x;
+  *store.asf64 += x;
 }
 
-void number_worker_double::mul_double(number_store *store, double x)
+void worker_multi_double::mul_double(const number_pointer store, double x)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl*=x;
+  *store.asf64 *= x;
 }
 
-void number_worker_double::add(number_store *store, const number_store *other)
+void worker_multi_double::add(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  assert(other->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl+=other->as.doubl;
+  *store.asf64 += *other.asf64;
 }
 
-void number_worker_double::sub(number_store *store, const number_store *other)
+void worker_multi_double::sub(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  assert(other->dbgType==number_worker::Type::typeDouble);
-  store->as.doubl-=other->as.doubl;
+  *store.asf64 -= *other.asf64;
 }
 
-void number_worker_double::rsub(number_store *store, const number_store *other)
+void worker_multi_double::rsub(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDouble);
-  assert(other->dbgType==Type::typeDouble);
-  store->as.doubl=other->as.doubl-store->as.doubl;
+  *store.asf64 = *other.asf64-*store.asf64;
 }
 
-void number_worker_double::mul(number_store *store, const number_store *other)
+void worker_multi_double::mul(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDouble);
-  assert(other->dbgType==Type::typeDouble);
-  store->as.doubl*=other->as.doubl;
+  *store.asf64 *= *other.asf64;
 }
 
-void number_worker_double::sqr(number_store *store)
+void worker_multi_double::sqr(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  store->as.doubl*=store->as.doubl;
+  *store.asf64 *= *store.asf64;
 }
 
-double number_worker_double::radixfloor(number_store *store1, number_store *store2)
+double worker_multi_double::radixfloor(const number_pointer_c store1, const number_pointer_c store2)
 {
-  assert(store1->dbgType==Type::typeDouble);
-  assert(store2->dbgType==Type::typeDouble);
-  int ilog1=std::ilogb(store1->as.doubl);
-  int ilog2=std::ilogb(store2->as.doubl);
+  int ilog1=std::ilogb(*store1.asf64);
+  int ilog2=std::ilogb(*store2.asf64);
   if (ilog1<ilog2)
     ilog1=ilog2;
   return ldexp(1, ilog1);
 }
 
-void number_worker_double::recip(number_store *store)
+void worker_multi_double::recip(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  store->as.doubl=1/store->as.doubl;
+  *store.asf64 = 1/(*store.asf64);
 }
 
-void number_worker_double::sqrt(number_store *store)
+void worker_multi_double::sqrt(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  store->as.doubl=std::sqrt(store->as.doubl);
+  *store.asf64 = std::sqrt(*store.asf64);
 }
 
-int number_worker_double::compare(const number_store *store, const number_store *other)
+int worker_multi_double::compare(const number_pointer_c store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDouble);
-  assert(other->dbgType==Type::typeDouble);
-  if (store->as.doubl==other->as.doubl)
+  if (*store.asf64 == *other.asf64)
     return 0;
-  else if (store->as.doubl<other->as.doubl)
+  else if (*store.asf64 < *other.asf64)
     return -1;
   else
     return +1;
 }
 
-bool number_worker_double::isequal(const number_store *store, const number_store *other)
+bool worker_multi_double::isequal(const number_pointer_c store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDouble);
-  assert(other->dbgType==Type::typeDouble);
-  return store->as.doubl==other->as.doubl;
+  return *store.asf64 == *other.asf64;
 }
 
-bool number_worker_double::is0(const number_store *store)
+bool worker_multi_double::is0(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  return store->as.doubl==0;
+  return *store.asf64 == 0;
 }
 
-bool number_worker_double::isle(const number_store *store, const number_store *other)
+bool worker_multi_double::isle(const number_pointer_c store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDouble);
-  assert(other->dbgType==Type::typeDouble);
-  return store->as.doubl<=other->as.doubl;
+  return *store.asf64 <= *other.asf64;
 }
 
-bool number_worker_double::isle0(const number_store *store)
+bool worker_multi_double::isle0(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  return store->as.doubl<=0;
+  return *store.asf64 <= 0;
 }
 
-bool number_worker_double::isl0(const number_store *store)
+bool worker_multi_double::isl0(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  return store->as.doubl<0;
+  return *store.asf64 < 0;
 }
 
-bool number_worker_double::isl1(const number_store *store)
+bool worker_multi_double::isl1(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  return store->as.doubl<1;
+  return *store.asf64 < 1;
 }
 
-QString number_worker_double::toString(const number_store *store)
+QString worker_multi_double::toString(const number_pointer_c store)
 {
-  assert(store->dbgType==number_worker::Type::typeDouble);
-  return QString::number(store->as.doubl, 'f', 16);
+  return QString::number(*store.asf64, 'f', 16);
 }
 
-int number_worker_double::toRound(const number_store *store)
+int worker_multi_double::toRound(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  return qRound(store->as.doubl);
+  return qRound(*store.asf64);
 }
 
-double number_worker_double::toDouble(const number_store *store)
+double worker_multi_double::toDouble(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDouble);
-  return store->as.doubl;
+  return *store.asf64;
 }
 #endif //NUMBER_DOUBLE_EXISTS
 
 
-void number_worker_ddouble::init_(number_store *store, void *placement, double val)
+#if !ONLY_DOUBLE_WORKER
+void worker_multi_ddouble::zero(const number_pointer store, double val)
 {
-  store->init_(number_worker::Type::typeDDouble, placement, val);
+  store.asdd->zero(val);
 }
 
-void number_worker_ddouble::zero(number_store *store, double val)
-{
-  store->zero(number_worker::Type::typeDDouble, val);
-}
-
-void number_worker_ddouble::swap(number_store *store, number_store *src)
+/*void number_worker_ddouble::swap(number_store *store, number_store *src)
 {
   assert(store);
   assert(src);
@@ -748,574 +828,445 @@ void number_worker_ddouble::swap(number_store *store, number_store *src)
   src->as.ddouble_.dd=nullptr;
   store->dbgType=Type::typeDDouble;
   src->dbgType=Type::typeEmpty;
+}*/
+
+void worker_multi_ddouble::assign(const number_pointer store, const number_pointer_c src)
+{
+  *store.asdd = *src.asdd;
 }
 
-void number_worker_ddouble::assign(number_store *store, const number_store *src)
+void worker_multi_ddouble::chs(const number_pointer store)
 {
-  assert(store);
-  assert(src);
-  assert(store->dbgType==Type::typeDDouble);
-  assert(src->dbgType==Type::typeDDouble);
-  *store->as.ddouble_.dd=*src->as.ddouble_.dd;
+  store.asdd->chs();
 }
 
-void number_worker_ddouble::chs(number_store *store)
+void worker_multi_ddouble::lshift(const number_pointer store, int shoft)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->chs();
+  store.asdd->lshift(shoft);
 }
 
-void number_worker_ddouble::lshift(number_store *store, int shoft)
+void worker_multi_ddouble::round(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->lshift(shoft);
+  store.asdd->round();
 }
 
-void number_worker_ddouble::round(number_store *store)
+void worker_multi_ddouble::frac(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->round();
-  //if lo==+-0.5 exactly, we should decide based on hi whether to round to +-1 or 0 but who cares
-  /*if ((store->as.ddouble_.dd->lo_<=-0.5) || (store->as.ddouble_.dd->lo_>=0.5))
-  {
-    //store->as.ddouble_.dd->hi=round(store->as.ddouble_.dd->hi);
-    store->as.ddouble_.dd->lo_=std::round(store->as.ddouble_.dd->lo_);
-  }
-  else
-  {
-    store->as.ddouble_.dd->hi=std::round(store->as.ddouble_.dd->hi);
-    store->as.ddouble_.dd->lo_=0;
-  }*/
+  store.asdd->frac();
 }
 
-void number_worker_ddouble::frac(number_store *store)
+void worker_multi_ddouble::mod1(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->frac();
-  /*if (store->as.ddouble_.dd->hi<0)
-  { //-1002.3+0.001 ->-=ceil,-=ceil-> -0.3, -0.999 N/A
-    //-1002.3-0.001 ->-=ceil,-=ceil-> -0.3, -0.001
-    store->as.ddouble_.dd->hi-=ceil(store->as.ddouble_.dd->hi);
-    store->as.ddouble_.dd->lo-=ceil(store->as.ddouble_.dd->lo);
-    store->as.ddouble_.dd->add_double(1);
-    store->as.ddouble_.dd->checksigns();
-  }
-  else
-  {
-    store->as.ddouble_.dd->hi-=floor(store->as.ddouble_.dd->hi);
-    store->as.ddouble_.dd->lo-=floor(store->as.ddouble_.dd->lo);
-    store->as.ddouble_.dd->checksigns();
-  }*/
+  store.asdd->mod1();
 }
 
-void number_worker_ddouble::mod1(number_store *store)
+void worker_multi_ddouble::add_double(const number_pointer store, double x)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->mod1();
-  /*store->as.ddouble_.dd->hi-=floor(store->as.ddouble_.dd->hi);
-  store->as.ddouble_.dd->lo-=floor(store->as.ddouble_.dd->lo);
-  store->as.ddouble_.dd->checksigns();*/
+  store.asdd->add_double(x);
 }
 
-void number_worker_ddouble::add_double(number_store *store, double x)
+void worker_multi_ddouble::mul_double(const number_pointer store, double x)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->add_double(x);
+  store.asdd->mul_double(x);
 }
 
-void number_worker_ddouble::mul_double(number_store *store, double x)
+void worker_multi_ddouble::add(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->mul_double(x);
+  store.asdd->add(other.asdd->hi, other.asdd->lo_);
 }
 
-void number_worker_ddouble::add(number_store *store, const number_store *other)
+void worker_multi_ddouble::sub(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->add(other->as.ddouble_.dd->hi, other->as.ddouble_.dd->lo_);
+  store.asdd->add(-other.asdd->hi, -other.asdd->lo_);
+}
+void worker_multi_ddouble::rsub(const number_pointer store, const number_pointer_c other)
+{
+  store.asdd->chs();
+  store.asdd->add(other.asdd->hi, other.asdd->lo_);
 }
 
-void number_worker_ddouble::sub(number_store *store, const number_store *other)
+void worker_multi_ddouble::mul(const number_pointer store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->add(-other->as.ddouble_.dd->hi, -other->as.ddouble_.dd->lo_);
-}
-void number_worker_ddouble::rsub(number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->chs();
-  store->as.ddouble_.dd->add(other->as.ddouble_.dd->hi, other->as.ddouble_.dd->lo_);
+  store.asdd->mul(other.asdd->hi, other.asdd->lo_);
 }
 
-void number_worker_ddouble::mul(number_store *store, const number_store *other)
+void worker_multi_ddouble::sqr(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->mul(other->as.ddouble_.dd->hi, other->as.ddouble_.dd->lo_);
+  store.asdd->sqr();
 }
 
-void number_worker_ddouble::sqr(number_store *store)
+double worker_multi_ddouble::radixfloor(const number_pointer_c store1, const number_pointer_c store2)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->sqr();
-}
-
-double number_worker_ddouble::radixfloor(number_store *store1, number_store *store2)
-{
-  assert(store1->dbgType==Type::typeDDouble);
-  assert(store2->dbgType==Type::typeDDouble);
-  double rf1=store1->as.ddouble_.dd->radixfloor();
-  double rf2=store2->as.ddouble_.dd->radixfloor();
+  double rf1=store1.asdd->radixfloor();
+  double rf2=store2.asdd->radixfloor();
   if (rf1<rf2)
     return rf2;
   return rf1;
 }
 
-void number_worker_ddouble::recip(number_store *store)
+void worker_multi_ddouble::recip(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->recip();
+  store.asdd->recip();
 }
 
-void number_worker_ddouble::sqrt(number_store *store)
+void worker_multi_ddouble::sqrt(const number_pointer store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  store->as.ddouble_.dd->sqrt();
+  store.asdd->sqrt();
 }
 
-int number_worker_ddouble::compare(const number_store *store, const number_store *other)
+int worker_multi_ddouble::compare(const number_pointer_c store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->compare(other->as.ddouble_.dd);
+  return store.asdd->compare(other.asdd);
 }
 
-bool number_worker_ddouble::isequal(const number_store *store, const number_store *other)
+bool worker_multi_ddouble::isequal(const number_pointer_c store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->isequal(other->as.ddouble_.dd);
+  return store.asdd->isequal(other.asdd);
 }
 
-bool number_worker_ddouble::is0(const number_store *store)
+bool worker_multi_ddouble::is0(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->is0();
+  return store.asdd->is0();
 }
 
-bool number_worker_ddouble::isle(const number_store *store, const number_store *other)
+bool worker_multi_ddouble::isle(const number_pointer_c store, const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  assert(other->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->isle(other->as.ddouble_.dd);
+  return store.asdd->isle(other.asdd);
 }
 
-bool number_worker_ddouble::isle0(const number_store *store)
+bool worker_multi_ddouble::isle0(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->isle0();
+  return store.asdd->isle0();
 }
 
-bool number_worker_ddouble::isl0(const number_store *store)
+bool worker_multi_ddouble::isl0(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->isl0();
+  return store.asdd->isl0();
 }
 
-bool number_worker_ddouble::isl1(const number_store *store)
+bool worker_multi_ddouble::isl1(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->isl1();
+  return store.asdd->isl1();
 }
 
-QString number_worker_ddouble::toString(const number_store *store)
+QString worker_multi_ddouble::toString(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return QString("dd(%1,%2)").arg(store->as.ddouble_.dd->hi, 0, 'f', 16).arg(store->as.ddouble_.dd->lo_, 0, 'g', 16);
+  return QString("dd(%1,%2)").arg(store.asdd->hi, 0, 'f', 16).arg(store.asdd->lo_, 0, 'g', 16);
 }
 
-int number_worker_ddouble::toRound(const number_store *store)
+int worker_multi_ddouble::toRound(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return floor(store->as.ddouble_.dd->hi+0.5)+floor(store->as.ddouble_.dd->lo_+0.5);
+  return floor(store.asdd->hi+0.5)+floor(store.asdd->lo_+0.5);
 }
 
-double number_worker_ddouble::toDouble(const number_store *store)
+double worker_multi_ddouble::toDouble(const number_pointer_c store)
 {
-  assert(store->dbgType==Type::typeDDouble);
-  return store->as.ddouble_.dd->hi;
+  return store.asdd->hi;
+}
+#endif
+
+
+/*
+number::number(number_pointer *src):
+  worker(src->worker), allocator(src->allocator),
+  free_storage_on_destroy(src->free_storage_on_destroy),
+  ptr(src->ptr)
+{
+  src->ptr.asf64=nullptr;
+}*/
+
+void number::zero(double v)
+{
+  worker->zero(ptr, v);
 }
 
-
-
-
-void number_worker_multi::init_(number_store *store, void *placement, double val)
+void number::assign(const number_pointer_c src)
 {
-  store->init_(Type::typeMulti, placement, val);
+  worker->assign(ptr, src);
 }
 
-void number_worker_multi::zero(number_store *store, double val)
+void number::lshift(int shoft)
 {
-  store->zero(Type::typeMulti, val);
+  worker->lshift(ptr, shoft);
 }
 
-void number_worker_multi::swap(number_store *store, number_store *src)
+void number::add(const number_pointer_c other)
 {
-  assert(store);
-  assert(src);
-  assert(store->dbgType==Type::typeEmpty);
-  assert(src->dbgType==Type::typeMulti);
-  assert(store->as.multi_.bytes==nullptr);
-  store->as.multi_.bytes=src->as.multi_.bytes;
-  src->as.multi_.bytes=nullptr;
-  store->dbgType=Type::typeMulti;
-  src->dbgType=Type::typeEmpty;
+  worker->add(ptr, other);
 }
 
-void number_worker_multi::assign(number_store *store, const number_store *src)
+void number::sub(const number_pointer_c other)
 {
-  assert(store);
-  assert(src);
-  assert(store->dbgType==Type::typeMulti);
-  assert(src->dbgType==Type::typeMulti);
-  *store->as.multi_.bytes=*src->as.multi_.bytes;
+  worker->sub(ptr, other);
 }
 
-void number_worker_multi::chs(number_store *store)
+void number::sqr()
 {
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->chs();
+  worker->sqr(ptr);
 }
 
-void number_worker_multi::lshift(number_store *store, int shoft)
+void number::mul(const number_pointer_c other)
 {
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->lshift(shoft);
+  worker->mul(ptr, other);
 }
 
-void number_worker_multi::round(number_store *store)
+void number::recip()
 {
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->round();
+  worker->recip(ptr);
 }
 
-void number_worker_multi::frac(number_store *store)
+void number::sqrt()
 {
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->frac();
+  worker->sqrt(ptr);
 }
 
-void number_worker_multi::mod1(number_store *store)
+void number::add_double(double x)
 {
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->mod1();
-}
-
-void number_worker_multi::add_double(number_store *store, double x)
-{
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->add_double(x);
-}
-
-void number_worker_multi::mul_double(number_store *store, double x)
-{
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->mul_double(x);
-}
-
-void number_worker_multi::add(number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->add(other->as.multi_.bytes);
-}
-
-void number_worker_multi::sub(number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->chs();
-  store->as.multi_.bytes->add(other->as.multi_.bytes);
-  store->as.multi_.bytes->chs();
-}
-void number_worker_multi::rsub(number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->chs();
-  store->as.multi_.bytes->add(other->as.multi_.bytes);
-}
-
-void number_worker_multi::mul(number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->mul(other->as.multi_.bytes);
-}
-
-void number_worker_multi::sqr(number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->sqr();
-}
-
-double number_worker_multi::radixfloor(number_store *store1, number_store *store2)
-{
-  assert(store1->dbgType==Type::typeMulti);
-  assert(store2->dbgType==Type::typeMulti);
-  double rf1=store1->as.multi_.bytes->radixfloor();
-  double rf2=store2->as.multi_.bytes->radixfloor();
-  if (rf1<rf2)
-    return rf2;
-  return rf1;
-}
-
-void number_worker_multi::recip(number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->recip();
-}
-
-void number_worker_multi::sqrt(number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  store->as.multi_.bytes->sqrt();
-}
-
-int number_worker_multi::compare(const number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->compare(other->as.multi_.bytes);
-}
-
-bool number_worker_multi::isequal(const number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->isequal(other->as.multi_.bytes);
-}
-
-bool number_worker_multi::is0(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->is0();
-}
-
-bool number_worker_multi::isle(const number_store *store, const number_store *other)
-{
-  assert(store->dbgType==Type::typeMulti);
-  assert(other->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->isle(other->as.multi_.bytes);
-}
-
-bool number_worker_multi::isle0(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->isle0();
-}
-
-bool number_worker_multi::isl0(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->isl0();
-}
-
-bool number_worker_multi::isl1(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->isl1();
-}
-
-QString number_worker_multi::toString(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return QString("multi");
-}
-
-int number_worker_multi::toRound(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->toround();
-}
-
-double number_worker_multi::toDouble(const number_store *store)
-{
-  assert(store->dbgType==Type::typeMulti);
-  return store->as.multi_.bytes->toDouble();
+  worker->add_double(ptr, x);
 }
 
 
-#if !COMPLEX_IS_TEMPLATE
-
-const number_store *complex::getMagTmp()
+void complex::zero(double r, double i)
 {
-  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
-  //  dbgPoint();
-  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
-  worker->assign(&tmp1_s, re_s);
-  worker->sqr(&tmp1_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->sqr(&tmp2_s);
-  worker->add(&tmp1_s, &tmp2_s);
-  return &tmp1_s;
+  worker->zero(re, r);
+  worker->zero(im, i);
 }
 
-const number_store *complex::getMag1Tmp()
+void complex::assign(const complex *other)
 {
-  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
-  //  dbgPoint();
-  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
-  worker->assign(&tmp1_s, re_s);
-  worker->sqr(&tmp1_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->sqr(&tmp2_s);
-  worker->add(&tmp1_s, &tmp2_s);
-  worker->add_double(&tmp1_s, -1);
-  return &tmp1_s;
+  worker->assign(re, other->re);
+  worker->assign(im, other->im);
 }
 
-const number_store *complex::getDist1Tmp()
+void complex::lshift(int shoft)
 {
-  worker->assign(&tmp1_s, re_s);
-  worker->add_double(&tmp1_s, -1);
-  worker->sqr(&tmp1_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->sqr(&tmp2_s);
-  worker->add(&tmp1_s, &tmp2_s);
-  return &tmp1_s;
+  worker->lshift(re, shoft);
+  worker->lshift(im, shoft);
 }
 
 void complex::add(const complex *other)
 {
-  worker->add(re_s, other->re_s);
-  worker->add(im_s, other->im_s);
+  worker->add(re, other->re);
+  worker->add(im, other->im);
+}
+
+void complex::sub(const complex *other)
+{
+  worker->sub(re, other->re);
+  worker->sub(im, other->im);
+}
+
+void complex::rsub(const complex *other)
+{
+  worker->rsub(re, other->re);
+  worker->rsub(im, other->im);
 }
 
 void complex::mul(const complex *other)
 {
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
   //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
   //  dbgPoint();
   //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
   //r:=r1*r2-i1*i2
   //i:=r1*i2+i1*r2
-  worker->assign(&tmp1_s, re_s);
-  worker->mul(&tmp1_s, other->re_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->mul(&tmp2_s, other->im_s);
-  worker->sub(&tmp1_s, &tmp2_s);
-  worker->assign(&tmp2_s, other->re_s);
-  worker->mul(re_s, other->im_s);
-  worker->mul(im_s, &tmp2_s);
-  worker->add(im_s, re_s);
-  worker->assign(re_s, &tmp1_s);
+  worker->assign(tmp1, re);
+  worker->mul(tmp1, other->re);
+  worker->assign(tmp2, im);
+  worker->mul(tmp2, other->im);
+  worker->sub(tmp1, tmp2); //r1*r2-i1*i2
+  worker->mul(re, other->im);
+  worker->mul(im, other->re);
+  worker->add(im, re); //i1*r2+r1*i2
+  worker->assign(re, tmp1);
 }
 
 void complex::sqr()
 {
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
   //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
   //  dbgPoint();
   //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
   //r:=r*r-i*i
   //i=2*r*i
-  worker->assign(&tmp1_s, im_s);
-  worker->sqr(&tmp1_s);
-  worker->mul(im_s, re_s);
-  worker->lshift(im_s, 1);
-  worker->sqr(re_s);
-  worker->sub(re_s, &tmp1_s);
+  worker->assign(tmp1, im);
+  worker->sqr(tmp1);
+  worker->mul(im, re);
+  worker->lshift(im, 1);
+  worker->sqr(re);
+  worker->sub(re, tmp1);
 }
 
 void complex::recip()
 {
-  getMagTmp();
+  getMag_tmp_();
   recip_prepared();
 }
 
 void complex::recip_prepared()
 { // 1/(re+i*im) = (re-i*im)/((re+i*im)*(re-i*im)) = (re-i*im)/(re*re+im*im)
-  worker->recip(&tmp1_s);
-  worker->mul(re_s, &tmp1_s);
-  worker->chs(im_s);
-  worker->mul(im_s, &tmp1_s);
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->recip(tmp1);
+  worker->mul(re, tmp1);
+  worker->chs(im);
+  worker->mul(im, tmp1);
 }
 
 void complex::sqrt()
 {
-  worker->assign(&tmp1_s, re_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->sqr(&tmp1_s);
-  worker->sqr(&tmp2_s);
-  worker->add(&tmp1_s, &tmp2_s); //re*re+im*im
-  worker->sqrt(&tmp1_s);
-  if (!worker->isle0(re_s))
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->assign(tmp2, im);
+  worker->sqr(tmp1);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2); //re*re+im*im
+  worker->sqrt(tmp1);
+  if (!worker->isle0(re))
   {
-    worker->add(&tmp1_s, re_s);
-    worker->lshift(&tmp1_s, -1);
-    worker->sqrt(&tmp1_s); //t1=sqrt((sqrt(re*re+im*im)+re)/2);
-    worker->assign(re_s, &tmp1_s);
+    worker->add(tmp1, re);
+    worker->lshift(tmp1, -1);
+    worker->sqrt(tmp1); //t1=sqrt((sqrt(re*re+im*im)+re)/2);
+    worker->assign(re, tmp1); //re=t1
     /*if (t1==0)
       *res_im=0;
     else*/
-    worker->lshift(&tmp1_s, 1);
-    worker->recip(&tmp1_s);
-    worker->mul(im_s, &tmp1_s); //im=im/(2*t1);
+    worker->lshift(tmp1, 1);
+    worker->recip(tmp1);
+    worker->mul(im, tmp1); //im=im/(2*t1);
   }
   else
   {
-    worker->sub(&tmp1_s, re_s);
-    worker->lshift(&tmp1_s, -1);
-    worker->sqrt(&tmp1_s); //t1=sqrt((sqrt(re*re+im*im)-re)/2);
-    if (worker->isle0(&tmp1_s)) //t1==0
+    worker->sub(tmp1, re);
+    worker->lshift(tmp1, -1);
+    worker->sqrt(tmp1); //t1=sqrt((sqrt(re*re+im*im)-re)/2);
+    if (worker->isle0(tmp1)) //t1==0
     {
-      worker->zero(re_s);
-      worker->zero(im_s);
+      worker->zero(re);
+      worker->zero(im);
     }
     else
     {
-      worker->assign(re_s, im_s);
-      worker->assign(im_s, &tmp1_s); //new im=t1
-      worker->lshift(&tmp1_s, 1);
-      worker->recip(&tmp1_s);
-      worker->mul(re_s, &tmp1_s); //re=old im/(2*t1);
-      if (worker->isle0(re_s)) //isl0 would be nicer here
+      worker->assign(re, im);
+      worker->assign(im, tmp1); //new im=t1
+      worker->lshift(tmp1, 1);
+      worker->recip(tmp1);
+      worker->mul(re, tmp1); //re=old im/(2*t1);
+      if (worker->isl0(re))
       {
-        worker->chs(re_s);
-        worker->chs(im_s);
+        worker->chs(re);
+        worker->chs(im);
       };
     }
   };
 }
 
-const number_store *complex::mulreT(const complex *other) //Re(this*conjugate(other))
+double complex::getMag_double() const
+{
+  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->sqr(tmp1);
+  worker->assign(tmp2, im);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2);
+  return worker->toDouble(tmp1);
+}
+
+const number_pointer_c complex::getMag_tmp_() const
+{
+  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->sqr(tmp1);
+  worker->assign(tmp2, im);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2);
+  return tmp1;
+}
+
+const number_pointer_c complex::getMag1_tmp() const
+{
+  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
+  //  dbgPoint();
+  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->sqr(tmp1);
+  worker->assign(tmp2, im);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2);
+  worker->add_double(tmp1, -1);
+  return tmp1;
+}
+
+const number_pointer_c complex::getDist1_tmp() const
+{
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->add_double(tmp1, -1);
+  worker->sqr(tmp1);
+  worker->assign(tmp2, im);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2);
+  return tmp1;
+}
+
+const number_pointer_c complex::mulreT_tmp(const complex *other) const //Re(this*conjugate(other))
 { //re*ore+im*oim
-  worker->assign(&tmp1_s, re_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->mul(&tmp1_s, other->re_s);
-  worker->mul(&tmp2_s, other->im_s);
-  worker->add(&tmp1_s, &tmp2_s);
-  return &tmp1_s;
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->assign(tmp2, im);
+  worker->mul(tmp1, other->re);
+  worker->mul(tmp2, other->im);
+  worker->add(tmp1, tmp2);
+  return tmp1;
 }
 
-const number_store *complex::dist2_tmp(const complex *other)
+double complex::dist2_double(const complex *other) const
 {
-  worker->assign(&tmp1_s, re_s);
-  worker->assign(&tmp2_s, im_s);
-  worker->sub(&tmp1_s, other->re_s);
-  worker->sub(&tmp2_s, other->im_s);
-  worker->sqr(&tmp1_s);
-  worker->sqr(&tmp2_s);
-  worker->add(&tmp1_s, &tmp2_s);
-  return &tmp1_s;
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->assign(tmp2, im);
+  worker->sub(tmp1, other->re);
+  worker->sub(tmp2, other->im);
+  worker->sqr(tmp1);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2);
+  return worker->toDouble(tmp1);
 }
 
-bool complex::isequal(const complex *other)
+const number_pointer_c complex::dist2_tmp_(const complex *other) const
 {
-  return worker->isequal(re_s, other->re_s) &&
-      worker->isequal(im_s, other->im_s);
+  number_pointer tmp1, tmp2;
+  worker->getTmp12(tmp1, tmp2);
+  worker->assign(tmp1, re);
+  worker->assign(tmp2, im);
+  worker->sub(tmp1, other->re);
+  worker->sub(tmp2, other->im);
+  worker->sqr(tmp1);
+  worker->sqr(tmp2);
+  worker->add(tmp1, tmp2);
+  return tmp1;
+}
+
+bool complex::isequal(const complex *other) const
+{
+  return worker->isequal(re, other->re) &&
+         worker->isequal(im, other->im);
 }
 
 double sqr_double(double x)
@@ -1467,66 +1418,5 @@ void complex_double_quadratic2(double *res1_re, double *res1_im,
   }
 }
 
-#else //COMPLEX_IS_TEMPLATE
-
-template <class NW>
-const number_store *complex<NW>::getMagTmp()
-{
-  //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
-  //  dbgPoint();
-  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
-  worker.assign(&tmp1_s, re_s);
-  worker.sqr(&tmp1_s);
-  worker.assign(&tmp2_s, im_s);
-  worker.sqr(&tmp2_s);
-  worker.add(&tmp1_s, &tmp2_s);
-  return &tmp1_s;
-}
-
-template <class NW>
-void complex<NW>::add(const complex<NW> *other)
-{
-  assert(other->re_s);
-  assert(other->im_s);
-  worker.add(re_s, other->re_s);
-  worker.add(im_s, other->im_s);
-}
-
-template <class NW>
-void complex<NW>::mul(const complex<NW> *other)
-{
-  //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
-  //  dbgPoint();
-  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
-  //r:=r1*r2-i1*i2
-  //i:=r1*i2+i1*r2
-  worker.assign(&tmp1_s, re_s);
-  worker.mul(&tmp1_s, other->re_s);
-  worker.assign(&tmp2_s, im_s);
-  worker.mul(&tmp2_s, other->im_s);
-  worker.sub(&tmp1_s, &tmp2_s);
-  worker.assign(&tmp2_s, other->re_s);
-  worker.mul(re_s, other->im_s);
-  worker.mul(im_s, &tmp2_s);
-  worker.add(im_s, re_s);
-  worker.assign(re_s, &tmp1_s);
-}
-
-template <class NW>
-void complex<NW>::sqr()
-{
-  //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
-  //  dbgPoint();
-  //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
-  //r:=r*r-i*i
-  //i=2*r*i
-  worker.assign(&tmp1_s, im_s);
-  worker.sqr(&tmp1_s);
-  worker.mul(im_s, re_s);
-  worker.lshift_(im_s, 1);
-  worker.sqr(re_s);
-  worker.sub(re_s, &tmp1_s);
-}
-#endif //COMPLEX_IS_TEMPLATE
 
 } // namespace MandelMath

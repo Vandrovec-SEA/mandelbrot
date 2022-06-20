@@ -1,6 +1,16 @@
 #include "double_double.hpp"
 #include <cmath>
 
+void __nop()
+{
+
+}
+
+void dd_dbgPoint()
+{
+  __nop();
+}
+
 #if defined(_WIN32) && !defined(__GNUC__)
 #ifdef __BORLANDC__
 #else
@@ -270,7 +280,7 @@ void dd_real::sqr()
   checksigns();
 }
 
-double dd_real::radixfloor()
+double dd_real::radixfloor() const
 {
   int ilog1=std::ilogb(hi);
   return ldexp(1, ilog1);
@@ -373,11 +383,16 @@ void dd_real::round()
   {
     //hi=round(hi);
     lo_=std::round(lo_);
+    int discard;
+    double testme=std::frexp(lo_, &discard);
+    if (testme==-1 || testme==-0.5 || testme==0.5 || testme==1) //spec says it returns +-0.5 instead of 1 but that's just stupid
+      dd_dbgPoint(); //may need renormalization
   }
   else
   {
     hi=std::round(hi);
     lo_=0;
+    //shoud be good even at hi= +-2^52
   }
 }
 
@@ -434,7 +449,7 @@ void dd_real::mod1()
   }
 }
 
-int dd_real::compare(const dd_real *other)
+int dd_real::compare(const dd_real *other) const
 {
   if (hi<other->hi)
     return -1;
@@ -448,34 +463,34 @@ int dd_real::compare(const dd_real *other)
     return 0;
 }
 
-bool dd_real::isequal(const dd_real *other)
+bool dd_real::isequal(const dd_real *other) const
 {
   return (hi==other->hi) && (lo_==other->lo_);
 }
 
-bool dd_real::is0()
+bool dd_real::is0() const
 {
   return hi==0;
 }
 
-bool dd_real::isle(const dd_real *other)
+bool dd_real::isle(const dd_real *other) const
 {
   if (hi!=other->hi)
     return hi<other->hi;
   return lo_<=other->lo_;
 }
 
-bool dd_real::isle0()
+bool dd_real::isle0() const
 {
   return hi<=0;
 }
 
-bool dd_real::isl0()
+bool dd_real::isl0() const
 {
   return hi<0;
 }
 
-bool dd_real::isl1()
+bool dd_real::isl1() const
 {
   return hi<1;
 }

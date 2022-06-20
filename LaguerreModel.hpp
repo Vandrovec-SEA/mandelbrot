@@ -13,18 +13,19 @@ class LaguerreModel: public QObject
 public:
   LaguerreModel();
   ~LaguerreModel();
-  Q_INVOKABLE void setParams(ShareableViewInfo viewInfo);
-  void transformStore(LaguerrePoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
-                      LaguerrePoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
+  void transformStore(MandelMath::worker_multi *old_worker, MandelMath::worker_multi *old_sworker, LaguerrePointStore *old_store, int old_width, int old_height, const MandelMath::complex *old_c,
+                      MandelMath::worker_multi *new_worker, MandelMath::worker_multi *new_sworker, LaguerrePointStore *new_store, int new_width, int new_height, const MandelMath::complex *new_c,
                       int inlog, int new_step_log);
-  void setView_(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale);
+  Q_INVOKABLE void setParams(ShareableViewInfo viewInfo);
+  void setView_(const MandelMath::complex *c, double scale);
   Q_INVOKABLE void drag(double delta_x, double delta_y);
   Q_INVOKABLE void zoom(double x, double y, int inlog);
   Q_INVOKABLE void setImageSize(int width, int height);
-  void setWorker(MandelMath::number_worker *newWorker);
+  //void setWorker(MandelMath::worker_multi *newWorker);
   void startNewEpoch();
   void giveWorkAll();
   Q_INVOKABLE void writeToImage(ShareableImageWrapper img);
+  void reimToPixel(int *circ_x, int *circ_y, const MandelMath::complex *c, MandelMath::number *tmp);
   Q_INVOKABLE void paintOrbit(ShareableImageWrapper image, int x, int y);
   Q_INVOKABLE QString pixelXtoRE_str(int x);
   Q_INVOKABLE QString pixelYtoIM_str(int y);
@@ -32,6 +33,17 @@ public:
   Q_INVOKABLE QString getTextXY();
   Q_INVOKABLE QString getTextInfoGen();
   Q_INVOKABLE QString getTextInfoSpec();
+  MandelMath::worker_multi::Allocator *paramsAllocator;
+  struct Params
+  {
+    static constexpr int LEN=4;
+    int period;
+    MandelMath::complex base;
+    MandelMath::complex root;
+    Params(MandelMath::worker_multi::Allocator *allocator);
+    void assign(Params *src);
+  } *params_;
+
 
   enum paintStyle
   {
@@ -42,13 +54,20 @@ public:
   Q_PROPERTY(paintStyle selectedPaintStyle READ getselectedPaintStyle WRITE setselectedPaintStyle NOTIFY selectedPaintStyleChanged)
   paintStyle getselectedPaintStyle() { return _selectedPaintStyle; }
   void setselectedPaintStyle(paintStyle ps) { _selectedPaintStyle=ps; }
+  int _threadsWorking;
+  Q_PROPERTY(int threadsWorking READ getThreadsWorking CONSTANT)
+  int getThreadsWorking() { return _threadsWorking; }
+  Q_PROPERTY(int threadsMax READ getThreadCount CONSTANT)
+  int getThreadCount() { return threadCount; }
 
   enum precision
   {
     precisionDouble=0,
-    precisionDDouble=1,
-    precisionQDouble=2,
-    precisionMulti=3
+#if !ONLY_DOUBLE_WORKER
+    precisionFloat128=1,
+    precisionDDouble=2,
+    precisionQDouble=3
+#endif
   };
   Q_ENUM(precision);
   precision _selectedPrecision;
@@ -65,59 +84,56 @@ signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
 protected:
+  MandelMath::worker_multi *currentWorker_; //for Position and Orbit
+  MandelMath::worker_multi::Allocator *storeAllocator;
+  MandelMath::worker_multi *storeWorker; //pointStore
+  LaguerrePointStore *pointStore_;
   //constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
-  LaguerrePoint *pointStore;
+  //LaguerrePoint *pointStore;
   int lastGivenPointIndex_;
   int effortBonus;
   //constexpr static int MAX_EFFORT=17;//18;
   int threadCount;
-  MandelEvaluator *threads;
+  MandelEvaluator **threads;
 
-  struct
-  {
-    int period;
-    MandelMath::number_store base_re_s_;
-    MandelMath::number_store base_im_s;
-    MandelMath::number_store root_re_s;
-    MandelMath::number_store root_im_s;
-    MandelMath::number_place base_re_p, base_im_p, root_re_p, root_im_p;
-  } params;
   struct Position
   {
-    MandelMath::number_worker *worker;
-#if NUMBER_DOUBLE_EXISTS
-    MandelMath::number_worker_double number_worker_double_template;
-#endif //NUMBER_DOUBLE_EXISTS
-    MandelMath::number_worker_ddouble number_worker_ddouble_template;
-    MandelMath::number_worker_multi number_worker_multi_template;
-    MandelMath::number_store center_re_s;
-    MandelMath::number_store center_im_s;
-    MandelMath::number_place center_re_p, center_im_p;
+    static constexpr int LEN=2;
+    MandelMath::worker_multi *worker;
+    MandelMath::complex center;
     int step_log;
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    Position();
+    Position(MandelMath::worker_multi::Allocator *allocator);
     ~Position();
-    void setNumberType(MandelMath::number_worker::Type ntype);
-    void setView(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale);
+    void assign(Position *src);
+    //void setNumberType(MandelMath::worker_multi::Type ntype);
+    void setView(const MandelMath::complex *c, double scale);
     void move(int delta_x, int delta_y);
     void scale(int inlog, int center_x, int center_y);
     void updateCachedDepth();
-    void pixelXtoRE(int x, MandelMath::number_store *result);
-    void pixelYtoIM(int y, MandelMath::number_store *result);
-  } position;
-  struct
+    void pixelXtoRE(int x, MandelMath::number_pointer result);
+    void pixelYtoIM(int y, MandelMath::number_pointer result);
+  } *position_;
+  struct Orbit
   {
-    MandelMath::number_worker *worker;
+    MandelMath::worker_multi *currentWorker;
+    //MandelMath::worker_multi::Allocator evaluatorAllocator;
     MandelEvaluator evaluator;
+    MandelMath::worker_multi::Allocator pointAllocator;
+    LaguerrePointStore pointDataStore;
     LaguerrePoint pointData;
     double first_mu_re_, first_mu_im, first_mum_re_, first_mum_im_;
-  } orbit;
+    Orbit(MandelMath::worker_multi::Allocator *allocator);
+    ~Orbit();
+    constexpr static int LEN=MandelEvaluator::LEN+LaguerrePoint::LEN;
+  } *orbit_;
+  constexpr static int LEN=Params::LEN+Position::LEN+Orbit::LEN  +4;
 signals:
   void doneWork(MandelEvaluator *evaluator);
 protected slots:

@@ -13,18 +13,18 @@ class MandelModel: public QObject
 public:
   MandelModel();
   ~MandelModel();
-  void transformStore(MandelPoint *old_store, int old_width, int old_height, MandelMath::number_store *old_cre, MandelMath::number_store *old_cim,
-                      MandelPoint *new_store, int new_width, int new_height, const MandelMath::number_store *new_cre, const MandelMath::number_store *new_cim,
+  void transformStore(MandelMath::worker_multi *old_worker, MandelMath::worker_multi *old_sworker, MandelPointStore *old_store, int old_width, int old_height, const MandelMath::complex *old_c,
+                      MandelMath::worker_multi *new_worker, MandelMath::worker_multi *new_sworker, MandelPointStore *new_store, int new_width, int new_height, const MandelMath::complex *new_c,
                       int inlog, int new_step_log);
   Q_INVOKABLE void setView_double(double c_re, double c_im, double scale);
-  void setView_(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale);
+  void setView_(const MandelMath::complex *c, double scale);
   Q_INVOKABLE void drag(double delta_x, double delta_y);
   Q_INVOKABLE void zoom(double x, double y, int inlog);
   Q_INVOKABLE void setImageSize(int width, int height);
-  void setWorker(MandelMath::number_worker *newWorker);
+  //volano pouze ze setPrecision void setWorker(MandelMath::worker_multi *newWorker);
   void startNewEpoch();
-  Q_INVOKABLE void writeToImage(ShareableImageWrapper img);
-  void reimToPixel(int *circ_x, int *circ_y, const MandelMath::number_store *re, const MandelMath::number_store *im, MandelMath::number_store *tmp);
+  Q_INVOKABLE int writeToImage(ShareableImageWrapper img);
+  void reimToPixel(int *circ_x, int *circ_y, const MandelMath::complex *c, MandelMath::number *tmp);
   Q_INVOKABLE void paintOrbit(ShareableImageWrapper image, int x, int y);
   Q_INVOKABLE QString pixelXtoRE_str(int x);
   Q_INVOKABLE QString pixelYtoIM_str(int y);
@@ -32,6 +32,7 @@ public:
   Q_INVOKABLE QString getTextXY();
   Q_INVOKABLE QString getTextInfoGen();
   Q_INVOKABLE QString getTextInfoSpec();
+  MandelMath::worker_multi::Allocator *shareableViewInfoAllocator;
   ShareableViewInfo getViewInfo();
   Q_PROPERTY(ShareableViewInfo viewInfo READ getViewInfo CONSTANT)// WRITE setViewInfo NOTIFY viewInfoChanged)
 
@@ -59,9 +60,11 @@ public:
   enum precision
   {
     precisionDouble=0,
-    precisionDDouble=1,
-    precisionQDouble=2,
-    precisionMulti=3
+#if !ONLY_DOUBLE_WORKER
+    precisionFloat128=1,
+    precisionDDouble=2,
+    precisionQDouble=3
+#endif
   };
   Q_ENUM(precision);
   precision _selectedPrecision;
@@ -80,68 +83,80 @@ signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
 protected:
+  MandelMath::worker_multi *currentWorker_; //for Position and Orbit
+  MandelMath::worker_multi::Allocator *storeAllocator;
+  MandelMath::worker_multi *storeWorker; //pointStore
+  MandelPointStore *pointStore_;
   //constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
-  MandelPoint *pointStore;
+  //MandelPoint *pointStore;
   int lastGivenPointIndex_;
   int effortBonus_;
   //constexpr static int MAX_EFFORT=17;//131072 iters;
-  constexpr static int MAX_EFFORT=22;//
+  static constexpr int MAX_EFFORT=22;//
   int threadCount;
-  MandelEvaluator *threads;
+  MandelEvaluator **threads;
+  QElapsedTimer timerWriteToImage;
 
   struct Position
   {
-    MandelMath::number_worker *worker;
+    static constexpr int LEN=2;
+    MandelMath::worker_multi *worker;
 #if NUMBER_DOUBLE_EXISTS
-    MandelMath::number_worker_double number_worker_double_template;
+    //MandelMath::worker_multi_double number_worker_double_template;
 #endif //NUMBER_DOUBLE_EXISTS
-    MandelMath::number_worker_ddouble number_worker_ddouble_template;
-    MandelMath::number_worker_multi number_worker_multi_template;
-    MandelMath::number_store center_re_s;
-    MandelMath::number_store center_im_s;
-    MandelMath::number_place center_re_p;
-    MandelMath::number_place center_im_p;
+    //MandelMath::number_worker_ddouble number_worker_ddouble_template;
+    //MandelMath::number_worker_multi number_worker_multi_template;
+    MandelMath::complex center;
     int step_log;
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    Position();
+    Position(MandelMath::worker_multi::Allocator *allocator);//: worker(worker), center(worker), ;
     ~Position();
-    void setNumberType(MandelMath::number_worker::Type ntype);
-    void setView(const MandelMath::number_store *c_re, const MandelMath::number_store *c_im, double scale);
+    void assign(Position *src);
+    //void setNumberType(MandelMath::worker_multi::Type ntype);
+    void setView(const MandelMath::complex *c, double scale);
     void move(int delta_x, int delta_y);
     void scale(int inlog, int center_x, int center_y);
     void updateCachedDepth();
-    void pixelXtoRE(int x, MandelMath::number_store *result);
-    void pixelYtoIM(int y, MandelMath::number_store *result);
-  } position;
-  struct
+    void pixelXtoRE(int x, MandelMath::number_pointer result);
+    void pixelYtoIM(int y, MandelMath::number_pointer result);
+  } *position_;
+  struct Orbit
   {
-    MandelMath::number_worker *worker;
+    MandelMath::worker_multi *currentWorker;
+    //MandelMath::worker_multi::Allocator evaluatorAllocator;
     MandelEvaluator evaluator;
+    MandelMath::worker_multi::Allocator pointAllocator;
+    MandelPointStore pointDataStore;
     MandelPoint pointData;
-    MandelMath::number_store lagu_c_re_, lagu_c_im;
-    MandelMath::number_store lagu_r_re, lagu_r_im;
-    MandelMath::number_store tmp;
-    MandelMath::number_place lagu_c_re_p, lagu_c_im_p, lagu_r_re_p, lagu_r_im_p, tmp_p;
-    struct
+    MandelMath::complex lagu_c;
+    MandelMath::complex lagu_r;
+    MandelMath::number tmp;
+    struct Bulb
     {
       bool valid;
-      MandelMath::number_store cb_re, cb_im;
-      MandelMath::number_store rb_re_, rb_im;
-      MandelMath::number_store xc_re, xc_im;
-      MandelMath::number_store baseZC_re, baseZC_im;
-      MandelMath::number_store baseCC_re, baseCC_im;
+      MandelMath::complex cb;
+      MandelMath::complex rb;
+      MandelMath::complex xc;
+      MandelMath::complex baseZC;
+      MandelMath::complex baseCC;
       int foundMult;
       bool is_card;
-      MandelMath::number_place cb_re_p, cb_im_p, rb_re_p, rb_im_p, xc_re_p, xc_im_p;
-      MandelMath::number_place baseZC_re_p, baseZC_im_p, baseCC_re_p, baseCC_im_p;
+      Bulb(MandelMath::worker_multi::Allocator *allocator);
+      ~Bulb();
+      constexpr static int LEN=10;
     } bulb;
-  } orbit;
+    Orbit(MandelMath::worker_multi::Allocator *allocator);
+    ~Orbit();
+    constexpr static int LEN=MandelEvaluator::LEN+MandelPoint::LEN+5+Bulb::LEN;
+  } *orbit_;
+  //constexpr static int INDEX_OF_POINTDATA=Position::LEN+MandelEvaluator::LEN;
+  constexpr static int LEN=ShareableViewInfo::LEN+Position::LEN+Orbit::LEN  +4;
 };
 
 
