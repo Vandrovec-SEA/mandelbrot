@@ -98,9 +98,9 @@ Window {
                 model: ListModel {
                     id: precision_model
                     ListElement { text: "Double"; key: 0 }
-                    ListElement { text: "DDouble"; key: 1 }
-                    //ListElement { text: "QDouble"; key: 2 }
-                    ListElement { text: "Multi"; key: 3 }
+                    ListElement { text: "Float128"; key: 1 }
+                    ListElement { text: "DDouble"; key: 2 }
+                    ListElement { text: "QDouble"; key: 3 }
                 }
                 onActivated:
                 {
@@ -297,22 +297,22 @@ Window {
         onTriggered: {
             if (rbuttonViewMand.checked)
             {
-              labelInfoSpec.text=mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
+              mandelModel.writeToImage(mandelImageCombiner.getBaseImage());
               mandelImageCombiner.update();
               labelXY.text=mandelModel.getTextXY();
               labelInfoGen.text=mandelModel.getTextInfoGen();
-              //labelInfoSpec.text=mandelModel.getTextInfoSpec();
+              labelInfoSpec.text=mandelModel.getTextInfoSpec();
               busyIndicator.color=(mandelModel.threadsWorking===0?"green":mandelModel.threadsWorking===mandelModel.threadsMax?"red":"yellow")
               busyIndicator2.text=mandelModel.threadsWorking
             };
             if (rbuttonViewLagu.checked)
             {
               laguerreModel.getTimes();
-              labelInfoSpec.text=laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
+              laguerreModel.writeToImage(laguerreImageCombiner.getBaseImage());
               laguerreImageCombiner.update();
               labelXY.text=laguerreModel.getTextXY();
               labelInfoGen.text=laguerreModel.getTextInfoGen();
-              //labelInfoSpec.text=laguerreModel.getTextInfoSpec();
+              labelInfoSpec.text=laguerreModel.getTextInfoSpec();
             };
         }
     }

@@ -127,13 +127,13 @@ protected:
     MandelMath::worker_multi *currentWorker;
     //MandelMath::worker_multi::Allocator evaluatorAllocator;
     MandelEvaluator evaluator;
-    MandelMath::worker_multi::Allocator pointAllocator;
+    //MandelMath::worker_multi::Allocator pointAllocator;
     LaguerrePointStore pointDataStore;
     LaguerrePoint pointData;
     double first_mu_re_, first_mu_im, first_mum_re_, first_mum_im_;
     Orbit(MandelMath::worker_multi::Allocator *allocator);
     ~Orbit();
-    constexpr static int LEN=MandelEvaluator::LEN+LaguerrePoint::LEN;
+    constexpr static int LEN=0*MandelEvaluator::LEN+LaguerrePoint::LEN;
   } *orbit_;
   constexpr static int LEN=Params::LEN+LaguerrePoint::LEN+Position::LEN+Orbit::LEN  +4;
 signals:

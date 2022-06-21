@@ -607,8 +607,9 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (y*imageWidth+x)*MandelPoint::LEN, MandelPoint::LEN, nullptr);
   //MandelPoint data_(&pointStore_[y*imageWidth+x], &allo);
-  MandelPoint *data=&orbit_->evaluator.currentData;
-  switch (data->store->state)
+  //MandelPoint *data=&orbit_->evaluator.currentData;
+  MandelPointStore *resultStore=&pointStore_[y*imageWidth+x];
+  switch (resultStore->state)
   {
     case MandelPointStore::State::stOutside:
     case MandelPointStore::State::stOutAngle:
@@ -616,10 +617,10 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
       int exterior;
       painter.setBrush(Qt::BrushStyle::NoBrush);
       painter.setPen(QColor(0xff, 0xff, 0));
-      exterior=qRound(data->store->exterior_hits/position_->step_size__);
+      exterior=qRound(resultStore->exterior_hits/position_->step_size__);
       painter.drawEllipse(x-exterior, y-exterior, 2*exterior, 2*exterior);
       painter.setPen(QColor(0xc0, 0xc0, 0));
-      exterior=qRound(data->store->exterior_avoids/position_->step_size__);
+      exterior=qRound(resultStore->exterior_avoids/position_->step_size__);
       painter.drawEllipse(x-exterior, y-exterior, 2*exterior, 2*exterior);
     } break;
     case MandelPointStore::State::stPeriod2:
@@ -628,10 +629,10 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
       int interior;
       painter.setBrush(Qt::BrushStyle::NoBrush);
       painter.setPen(QColor(0, 0xff, 0xff));
-      interior=qRound(data->store->interior/position_->step_size__);
+      interior=qRound(resultStore->interior/position_->step_size__);
       painter.drawEllipse(x-interior, y-interior, 2*interior, 2*interior);
       painter.setPen(QColor(0, 0xc0, 0xc0));
-      interior=qRound(data->store->interior/4/position_->step_size__);
+      interior=qRound(resultStore->interior/4/position_->step_size__);
       painter.drawEllipse(x-interior, y-interior, 2*interior, 2*interior);
     } break;
     default: ;
@@ -651,8 +652,8 @@ void MandelModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     int line_sx, line_sy, line_ex, line_ey;
     reimToPixel(&line_sx, &line_sy, &orbit_->evaluator.currentData.f, &orbit_->tmp);
 
-    if ((data->store->state==MandelPointStore::State::stPeriod2 || data->store->state==MandelPointStore::State::stPeriod3) &&
-        orbit_->evaluator.currentData.store->iter<data->store->period)
+    if ((resultStore->state==MandelPointStore::State::stPeriod2 || resultStore->state==MandelPointStore::State::stPeriod3) &&
+        orbit_->evaluator.currentData.store->iter<resultStore->period)
     { //paint first period fully
       orbit_->evaluator.currentParams.maxiter_=orbit_->evaluator.currentData.store->iter+1;
     }

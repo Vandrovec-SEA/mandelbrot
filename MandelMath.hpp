@@ -36,23 +36,31 @@ typedef dd_real dq_real;
 union number_pointer
 {
   double *asf64;
+#if !ONLY_DOUBLE_WORKER
   __float128 *asf128;
   dd_real *asdd;
   dq_real *asdq;
+#endif
   number_pointer(): asf64(nullptr) {}
   number_pointer(double *asf64): asf64(asf64) {}
 };
 
+#if 1 //faster
+typedef number_pointer number_pointer_c;
+#else //better
 union number_pointer_c
 {
   const double *asf64;
+#if !ONLY_DOUBLE_WORKER
   const __float128 *asf128;
   const dd_real *asdd;
   const dq_real *asdq;
+#endif
   number_pointer_c(): asf64(nullptr) {}
   number_pointer_c(double *asf64): asf64(asf64) {}
   number_pointer_c(const number_pointer &src): asf64(src.asf64) {}
 };
+#endif
 
 class complex; //forward declaration for friend
 
