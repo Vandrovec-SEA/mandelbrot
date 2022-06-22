@@ -112,9 +112,10 @@ protected:
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    Position(MandelMath::worker_multi::Allocator *allocator);
+    //Position(MandelMath::worker_multi::Allocator *allocator);
+    Position(MandelMath::worker_multi::Allocator *allocator, Position *src);
     ~Position();
-    void assign(Position *src);
+    //void assign(Position *src);
     //void setNumberType(MandelMath::worker_multi::Type ntype);
     void setView(const MandelMath::complex *c, double scale);
     void move(int delta_x, int delta_y);

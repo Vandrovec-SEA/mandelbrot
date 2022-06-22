@@ -626,25 +626,26 @@ worker_multi_double::worker_multi_double(Allocator *source):
 #if !ONLY_DOUBLE_WORKER
     case Type::typeFloat128:
     {
+      const __float128 *src_storage=specific_cast<worker_multi_float128 *, worker_multi *>(source->worker)->_getStorage();
       for (int i=0; i<capacity; i++)
       {
-        storage[i]=*((worker_multi_double *)source)->getNumber(i).asf128;
+        storage[i]=src_storage[oldfirst+i];
       }
     } break;
     case Type::typeDDouble:
     {
-      //dd_real *src_storage=((worker_multi_ddouble *)source)->storage;
-      for (int i=0; i<capacity; i++)
+      const dd_real *src_storage=specific_cast<worker_multi_ddouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++) //segfault
       {
-        storage[i]=((worker_multi_double *)source)->getNumber(i).asdd->hi;
+        storage[i]=src_storage[oldfirst+i].hi;
       }
     } break;
     case Type::typeQDouble:
     {
-      //dd_real *src_storage=((worker_multi_ddouble *)source)->storage;
+      const dq_real *src_storage=specific_cast<worker_multi_qdouble *, worker_multi *>(source->worker)->_getStorage();
       for (int i=0; i<capacity; i++)
       {
-        storage[i]=((worker_multi_double *)source)->getNumber(i).asdq->hi;
+        storage[i]=src_storage[oldfirst+i].hi;
       }
     } break;
 #endif
@@ -835,6 +836,371 @@ double worker_multi_double::toDouble(const number_pointer_c store)
 
 
 #if !ONLY_DOUBLE_WORKER
+
+worker_multi_float128::worker_multi_float128(Allocator *source):
+  worker_multi(Type::typeFloat128, specific_cast<worker_multi_float128 *, worker_multi *>(source->worker)->capacity)
+{
+  int oldfirst, oldlast;
+  source->_getRange(oldfirst, oldlast);
+  storage=new __float128[oldlast-oldfirst];
+  switch (source->worker->ntype())
+  {
+    case Type::typeEmpty:
+    {
+      for (int i=0; i<capacity; i++)
+        storage[i]=0;
+    } break;
+    case Type::typeDouble:
+    {
+      const double *src_storage=specific_cast<worker_multi_double *, worker_multi *>(source->worker)->_getStorage();
+      //TODO: memmove but we'll see later
+      for (int i=0; i<capacity; i++)
+        storage[i]=src_storage[oldfirst+i];
+    } break;
+    case Type::typeFloat128:
+    {
+      const __float128 *src_storage=specific_cast<worker_multi_float128 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=src_storage[oldfirst+i];
+      }
+    } break;
+    case Type::typeDDouble:
+    {
+      const dd_real *src_storage=specific_cast<worker_multi_ddouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=src_storage[oldfirst+i].hi+(__float128)src_storage[oldfirst+i].lo_;
+      }
+    } break;
+    case Type::typeQDouble:
+    {
+      const dq_real *src_storage=specific_cast<worker_multi_qdouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=src_storage[oldfirst+i].hi+(__float128)src_storage[oldfirst+i].lo_;
+      }
+    } break;
+  }
+}
+
+worker_multi_float128::~worker_multi_float128()
+{
+  delete[] storage;
+  storage=nullptr;
+}
+
+number_pointer worker_multi_float128::getNumber(int index)
+{
+  assert(allocator.checkIndex(index));
+  assert(index>=0 && index<capacity);
+  return number_pointer(&storage[index]);
+}
+
+void worker_multi_float128::getTmp12(number_pointer &t1, number_pointer &t2)
+{
+  t1.asf128=&tmp1;
+  t2.asf128=&tmp2;
+}
+
+void worker_multi_float128::assign_block(int dst, worker_multi *src_worker, int src, int len)
+{
+  assert(src_worker->ntype()==Type::typeFloat128);
+  worker_multi_float128 *access=(worker_multi_float128 *)src_worker;
+  assert(allocator.checkIndex(dst));
+  assert(allocator.checkIndex(dst+len-1));
+  assert(access->allocator.checkIndex(src));
+  assert(access->allocator.checkIndex(src+len-1));
+  assert(dst>=0 && dst+len<=capacity);
+  assert(src>=0 && src+len<=access->capacity);
+
+  for (int i=0; i<len; i++)
+    storage[dst+i]=access->storage[src+i];
+}
+
+void worker_multi_float128::zero(const number_pointer store, double val)
+{
+  *store.asf128=val;
+}
+
+void worker_multi_float128::assign(const number_pointer store, const number_pointer_c src)
+{
+  *store.asf128=*src.asf128;
+}
+
+void worker_multi_float128::chs(const number_pointer store)
+{
+  *store.asf128 = -*store.asf128;
+}
+
+void worker_multi_float128::lshift(const number_pointer store, int shoft)
+{
+  //*store.asf128=ldexp(*store.asf128, shoft);
+  //could try ldexp only on upper half but...
+  if (*store.asf128 != 0) //don't play with 0's exponent or you get NaN
+    ((uint16_t *)store.asf128)[7]+=shoft;
+}
+
+void worker_multi_float128::round(const number_pointer store)
+{
+  __float128 remainder=*store.asf128;
+  *store.asf128=0;
+  for (;;)
+  {
+    double some=std::round((double)remainder);
+    if (some==0)
+      break;
+    *store.asf128+=some;
+    remainder-=some;
+  }
+}
+
+void worker_multi_float128::frac(const number_pointer store)
+{
+  if (*store.asf128<0)
+  {
+    double some=ceil((double)*store.asf128);
+    while (some)
+    {
+      *store.asf128 -= some;
+      some=ceil((double)*store.asf128);
+    }
+  }
+  else
+  {
+    double some=floor((double)*store.asf128);
+    while (some)
+    {
+      *store.asf128 -= some;
+      some=floor((double)*store.asf128);
+    }
+  }
+}
+
+void worker_multi_float128::mod1(const number_pointer store)
+{
+  double some=floor((double)*store.asf128);
+  while (some)
+  {
+    *store.asf128 -= some;
+    some=floor((double)*store.asf128);
+  }
+}
+
+void worker_multi_float128::add_double(const number_pointer store, double x)
+{
+  *store.asf128 += x;
+}
+
+void worker_multi_float128::mul_double(const number_pointer store, double x)
+{
+  *store.asf128 *= x;
+}
+
+void worker_multi_float128::add(const number_pointer store, const number_pointer_c other)
+{
+  *store.asf128 += *other.asf128;
+}
+
+void worker_multi_float128::sub(const number_pointer store, const number_pointer_c other)
+{
+  *store.asf128 -= *other.asf128;
+}
+
+void worker_multi_float128::rsub(const number_pointer store, const number_pointer_c other)
+{
+  *store.asf128 = *other.asf128-*store.asf128;
+}
+
+void worker_multi_float128::mul(const number_pointer store, const number_pointer_c other)
+{
+  *store.asf128 *= *other.asf128;
+}
+
+void worker_multi_float128::sqr(const number_pointer store)
+{
+  *store.asf128 *= *store.asf128;
+}
+
+double worker_multi_float128::radixfloor(const number_pointer_c store1, const number_pointer_c store2)
+{
+  int ilog1=std::ilogb(*store1.asf64);
+  int ilog2=std::ilogb(*store2.asf64);
+  if (ilog1<ilog2)
+    ilog1=ilog2;
+  return ldexp(1, ilog1);
+}
+
+void worker_multi_float128::recip(const number_pointer store)
+{
+  *store.asf128 = 1/(*store.asf128);
+}
+
+void worker_multi_float128::sqrt(const number_pointer store)
+{
+  double x=1/std::sqrt((double)*store.asf128);
+  double ax=x*(double)*store.asf128;
+  *store.asf128 = ax + double(*store.asf128 - __float128(ax)*__float128(ax))*x/2;
+  //x=1/(sqrt + e)
+  //ax=a/(sqrt + e)+f
+  //result=a/(sqrt + e)+f + (a - (a/(sqrt + e)+f)*(a/(sqrt + e)+f) + g)*x/2
+  //result=a/(sqrt + e)+f + (a - (a*a/(sqrt + e)/(sqrt + e)+2*f*a/(sqrt + e)+f*f) + g)*x/2
+  //E=sqrt/(sqrt+e), a=sqrt*sqrt
+  //result=sqrt*E+f + (a - a*E*E-2*f*sqrt*E-f*f + g)*1/(sqrt + e)/2
+  //result ~ sqrt*E+f + (a*(1-E*E)-2*f*sqrt + g)*1/(sqrt + e)/2
+  //result ~ sqrt*E+f + sqrt*(1-E*E)*E/2-f*E + g/sqrt*E/2
+  //1-E*E(1-E)*(1+E)
+  //result ~ sqrt*E+f + sqrt*(1+E)*(1-E)*E/2-f*E + g/sqrt*E/2
+  //E=1+h
+  //result ~ sqrt*(1+h)+f + sqrt*(2+h)*(-h)*(1+h)/2-f*(1+h) + g/sqrt*(1+h)/2
+  //result ~ sqrt*(1+h) + sqrt*(-h)*(1+h)+sqrt*(-h)*(1+h)*h/2 + g/sqrt*(1+h)/2 -f*h
+  //result ~ sqrt + g/sqrt/2 + second order terms
+}
+
+int worker_multi_float128::compare(const number_pointer_c store, const number_pointer_c other)
+{
+  if (*store.asf128 == *other.asf128)
+    return 0;
+  else if (*store.asf128 < *other.asf128)
+    return -1;
+  else
+    return +1;
+}
+
+bool worker_multi_float128::isequal(const number_pointer_c store, const number_pointer_c other)
+{
+  return *store.asf128 == *other.asf128;
+}
+
+bool worker_multi_float128::is0(const number_pointer_c store)
+{
+  return *store.asf128 == 0;
+}
+
+bool worker_multi_float128::isle(const number_pointer_c store, const number_pointer_c other)
+{
+  return *store.asf128 <= *other.asf128;
+}
+
+bool worker_multi_float128::isle0(const number_pointer_c store)
+{
+  return *store.asf128 <= 0;
+}
+
+bool worker_multi_float128::isl0(const number_pointer_c store)
+{
+  return *store.asf128 < 0;
+}
+
+bool worker_multi_float128::isl1(const number_pointer_c store)
+{
+  return *store.asf128 < 1; //enough to check top 16-17 bits?
+}
+
+QString worker_multi_float128::toString(const number_pointer_c store)
+{
+  return QString::number(*store.asf128, 'f', 16);
+}
+
+int worker_multi_float128::toRound(const number_pointer_c store)
+{
+  return qRound((double)*store.asf128);
+}
+
+double worker_multi_float128::toDouble(const number_pointer_c store)
+{
+  return (double)*store.asf128;
+}
+
+
+
+
+
+
+
+number_pointer worker_multi_ddouble::getNumber(int index)
+{
+  assert(allocator.checkIndex(index));
+  assert(index>=0 && index<capacity);
+  return number_pointer(&storage[index]);
+}
+
+void worker_multi_ddouble::getTmp12(number_pointer &t1, number_pointer &t2)
+{
+  t1.asdd=&tmp1;
+  t2.asdd=&tmp2;
+}
+
+worker_multi_ddouble::worker_multi_ddouble(Allocator *source):
+  worker_multi(Type::typeDDouble, specific_cast<worker_multi_ddouble *, worker_multi *>(source->worker)->capacity)
+{
+  int oldfirst, oldlast;
+  source->_getRange(oldfirst, oldlast);
+  storage=new dd_real[oldlast-oldfirst];
+  switch (source->worker->ntype())
+  {
+    case Type::typeEmpty:
+    {
+      for (int i=0; i<capacity; i++)
+        storage[i].zero(0);
+    } break;
+    case Type::typeDouble:
+    {
+      const double *src_storage=specific_cast<worker_multi_double *, worker_multi *>(source->worker)->_getStorage();
+      //TODO: memmove but we'll see later
+      for (int i=0; i<capacity; i++)
+        storage[i].zero(src_storage[oldfirst+i]);
+    } break;
+    case Type::typeFloat128:
+    {
+      const __float128 *src_storage=specific_cast<worker_multi_float128 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].hi=(double)src_storage[oldfirst+i];
+        storage[i].lo_=src_storage[oldfirst+i]-storage[i].hi;
+      }
+    } break;
+    case Type::typeDDouble:
+    {
+      const dd_real *src_storage=specific_cast<worker_multi_ddouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].assign(src_storage[oldfirst+i]);
+      }
+    } break;
+    case Type::typeQDouble:
+    {
+      const dq_real *src_storage=specific_cast<worker_multi_qdouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].assign(src_storage[oldfirst+i]);
+      }
+    } break;
+  }
+}
+
+worker_multi_ddouble::~worker_multi_ddouble()
+{
+  delete[] storage;
+  storage=nullptr;
+}
+
+void worker_multi_ddouble::assign_block(int dst, worker_multi *src_worker, int src, int len)
+{
+  assert(src_worker->ntype()==Type::typeDDouble);
+  worker_multi_ddouble *access=(worker_multi_ddouble *)src_worker;
+  assert(allocator.checkIndex(dst));
+  assert(allocator.checkIndex(dst+len-1));
+  assert(access->allocator.checkIndex(src));
+  assert(access->allocator.checkIndex(src+len-1));
+  assert(dst>=0 && dst+len<=capacity);
+  assert(src>=0 && src+len<=access->capacity);
+
+  for (int i=0; i<len; i++)
+    storage[dst+i].assign(access->storage[src+i]);
+}
+
+
 void worker_multi_ddouble::zero(const number_pointer store, double val)
 {
   store.asdd->zero(val);
@@ -985,6 +1351,242 @@ int worker_multi_ddouble::toRound(const number_pointer_c store)
 double worker_multi_ddouble::toDouble(const number_pointer_c store)
 {
   return store.asdd->hi;
+}
+
+
+number_pointer worker_multi_qdouble::getNumber(int index)
+{
+  assert(allocator.checkIndex(index));
+  assert(index>=0 && index<capacity);
+  return number_pointer(&storage[index]);
+}
+
+void worker_multi_qdouble::getTmp12(number_pointer &t1, number_pointer &t2)
+{
+  t1.asqd=&tmp1;
+  t2.asqd=&tmp2;
+}
+
+worker_multi_qdouble::worker_multi_qdouble(Allocator *source):
+  worker_multi(Type::typeDDouble, specific_cast<worker_multi_qdouble *, worker_multi *>(source->worker)->capacity)
+{
+  int oldfirst, oldlast;
+  source->_getRange(oldfirst, oldlast);
+  storage=new dq_real[oldlast-oldfirst];
+  switch (source->worker->ntype())
+  {
+    case Type::typeEmpty:
+    {
+      for (int i=0; i<capacity; i++)
+        storage[i].zero(0);
+    } break;
+    case Type::typeDouble:
+    {
+      const double *src_storage=specific_cast<worker_multi_double *, worker_multi *>(source->worker)->_getStorage();
+      //TODO: memmove but we'll see later
+      for (int i=0; i<capacity; i++)
+        storage[i].zero(src_storage[oldfirst+i]);
+    } break;
+    case Type::typeFloat128:
+    {
+      const __float128 *src_storage=specific_cast<worker_multi_float128 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].hi=(double)src_storage[oldfirst+i];
+        storage[i].lo_=src_storage[oldfirst+i]-storage[i].hi;
+      }
+    } break;
+    case Type::typeDDouble:
+    {
+      const dd_real *src_storage=specific_cast<worker_multi_ddouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].assign(src_storage[oldfirst+i]);
+      }
+    } break;
+    case Type::typeQDouble:
+    {
+      const dq_real *src_storage=specific_cast<worker_multi_qdouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].assign(src_storage[oldfirst+i]);
+      }
+    } break;
+  }
+}
+
+worker_multi_qdouble::~worker_multi_qdouble()
+{
+  delete[] storage;
+  storage=nullptr;
+}
+
+void worker_multi_qdouble::assign_block(int dst, worker_multi *src_worker, int src, int len)
+{
+  assert(src_worker->ntype()==Type::typeQDouble);
+  worker_multi_qdouble *access=(worker_multi_qdouble *)src_worker;
+  assert(allocator.checkIndex(dst));
+  assert(allocator.checkIndex(dst+len-1));
+  assert(access->allocator.checkIndex(src));
+  assert(access->allocator.checkIndex(src+len-1));
+  assert(dst>=0 && dst+len<=capacity);
+  assert(src>=0 && src+len<=access->capacity);
+
+  for (int i=0; i<len; i++)
+    storage[dst+i].assign(access->storage[src+i]);
+}
+
+void worker_multi_qdouble::zero(const number_pointer store, double val)
+{
+  store.asqd->zero(val);
+}
+
+/*void number_worker_ddouble::swap(number_store *store, number_store *src)
+{
+  assert(store);
+  assert(src);
+  assert(store->dbgType==Type::typeEmpty);
+  assert(src->dbgType==Type::typeDDouble);
+  assert(store->as.ddouble_.dd==nullptr);
+  store->as.ddouble_.dd=src->as.ddouble_.dd;
+  src->as.ddouble_.dd=nullptr;
+  store->dbgType=Type::typeDDouble;
+  src->dbgType=Type::typeEmpty;
+}*/
+
+void worker_multi_qdouble::assign(const number_pointer store, const number_pointer_c src)
+{
+  *store.asqd = *src.asqd;
+}
+
+void worker_multi_qdouble::chs(const number_pointer store)
+{
+  store.asqd->chs();
+}
+
+void worker_multi_qdouble::lshift(const number_pointer store, int shoft)
+{
+  store.asqd->lshift(shoft);
+}
+
+void worker_multi_qdouble::round(const number_pointer store)
+{
+  store.asqd->round();
+}
+
+void worker_multi_qdouble::frac(const number_pointer store)
+{
+  store.asqd->frac();
+}
+
+void worker_multi_qdouble::mod1(const number_pointer store)
+{
+  store.asqd->mod1();
+}
+
+void worker_multi_qdouble::add_double(const number_pointer store, double x)
+{
+  store.asqd->add_double(x);
+}
+
+void worker_multi_qdouble::mul_double(const number_pointer store, double x)
+{
+  store.asqd->mul_double(x);
+}
+
+void worker_multi_qdouble::add(const number_pointer store, const number_pointer_c other)
+{
+  store.asqd->add(other.asqd->hi, other.asqd->lo_);
+}
+
+void worker_multi_qdouble::sub(const number_pointer store, const number_pointer_c other)
+{
+  store.asqd->add(-other.asqd->hi, -other.asqd->lo_);
+}
+
+void worker_multi_qdouble::rsub(const number_pointer store, const number_pointer_c other)
+{
+  store.asqd->chs();
+  store.asqd->add(other.asqd->hi, other.asqd->lo_);
+}
+
+void worker_multi_qdouble::mul(const number_pointer store, const number_pointer_c other)
+{
+  store.asqd->mul(other.asqd->hi, other.asqd->lo_);
+}
+
+void worker_multi_qdouble::sqr(const number_pointer store)
+{
+  store.asqd->sqr();
+}
+
+double worker_multi_qdouble::radixfloor(const number_pointer_c store1, const number_pointer_c store2)
+{
+  double rf1=store1.asqd->radixfloor();
+  double rf2=store2.asqd->radixfloor();
+  if (rf1<rf2)
+    return rf2;
+  return rf1;
+}
+
+void worker_multi_qdouble::recip(const number_pointer store)
+{
+  store.asqd->recip();
+}
+
+void worker_multi_qdouble::sqrt(const number_pointer store)
+{
+  store.asqd->sqrt();
+}
+
+int worker_multi_qdouble::compare(const number_pointer_c store, const number_pointer_c other)
+{
+  return store.asqd->compare(other.asqd);
+}
+
+bool worker_multi_qdouble::isequal(const number_pointer_c store, const number_pointer_c other)
+{
+  return store.asqd->isequal(other.asqd);
+}
+
+bool worker_multi_qdouble::is0(const number_pointer_c store)
+{
+  return store.asqd->is0();
+}
+
+bool worker_multi_qdouble::isle(const number_pointer_c store, const number_pointer_c other)
+{
+  return store.asqd->isle(other.asqd);
+}
+
+bool worker_multi_qdouble::isle0(const number_pointer_c store)
+{
+  return store.asqd->isle0();
+}
+
+bool worker_multi_qdouble::isl0(const number_pointer_c store)
+{
+  return store.asqd->isl0();
+}
+
+bool worker_multi_qdouble::isl1(const number_pointer_c store)
+{
+  return store.asqd->isl1();
+}
+
+QString worker_multi_qdouble::toString(const number_pointer_c store)
+{
+  return QString("dd(%1,%2)").arg(store.asqd->hi, 0, 'f', 16).arg(store.asqd->lo_, 0, 'g', 16);
+}
+
+int worker_multi_qdouble::toRound(const number_pointer_c store)
+{
+  return floor(store.asqd->hi+0.5)+floor(store.asqd->lo_+0.5);
+}
+
+double worker_multi_qdouble::toDouble(const number_pointer_c store)
+{
+  return store.asqd->hi;
 }
 #endif
 

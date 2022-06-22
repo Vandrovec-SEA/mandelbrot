@@ -188,7 +188,7 @@ public:
   constexpr static double MAGIC_MIN_SHRINK=1.5;
   constexpr static int MAX_PERIOD=8000;
   MandelMath::worker_multi *currentWorker;
-  MandelEvaluator(MandelMath::worker_multi::Type ntype);
+  MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dontRun);
   ~MandelEvaluator();
 #if NUMBER_DOUBLE_EXISTS
   static void simple_double(double cr, double ci, MandelPoint &data, int maxiter);

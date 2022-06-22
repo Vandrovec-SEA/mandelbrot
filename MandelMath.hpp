@@ -8,7 +8,7 @@
 #include "multiprec.hpp"
 
 #define NUMBER_DOUBLE_EXISTS 1
-#define ONLY_DOUBLE_WORKER 1
+#define ONLY_DOUBLE_WORKER 0
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -39,10 +39,13 @@ union number_pointer
 #if !ONLY_DOUBLE_WORKER
   __float128 *asf128;
   dd_real *asdd;
-  dq_real *asdq;
+  dq_real *asqd;
 #endif
   number_pointer(): asf64(nullptr) {}
   number_pointer(double *asf64): asf64(asf64) {}
+  number_pointer(__float128 *asf128): asf128(asf128) {}
+  number_pointer(dd_real *asdd): asdd(asdd) {}
+  //number_pointer(dq_real *asqd): asqd(asqd) {}
 };
 
 #if 1 //faster
@@ -82,7 +85,6 @@ public:
               , typeQDouble
 #endif
             };
-  virtual double eps2() { return 1.23e-32; }
 
   class Allocator
   {
@@ -115,6 +117,7 @@ protected:
   friend class MandelMath::complex;
 
 public:
+  virtual double eps2() { return 1.23e-32; }
   worker_multi(Type ntype, int capacity): _ntype(ntype), allocator(this, capacity, nullptr), capacity(capacity) { }
   virtual ~worker_multi() { capacity=0; }
   virtual Type ntype() { return this->_ntype; }
@@ -187,6 +190,7 @@ public:
   virtual void dealloc(number_pointer store) override;
   virtual void dealloc_array(int count) override;*/
   virtual void assign_block(int dst, worker_multi *src_worker, int src, int len) override; //for now, assert(this.ntype==src.ntype)
+  const double *_getStorage() { return storage; }
 
   //void init_(number_store *store, void *placement, double val=0) override;
   void zero(const number_pointer store, double val=0) override;
@@ -233,17 +237,19 @@ protected:
   virtual number_pointer getNumber(int index) override; //support for Allocator
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
 public:
-  double eps2() override { return 1.23e-32;  /* 2^-(2*53) */ }
+  double eps2() override { return 9.28e-69;  /* 2^-(2*113) */ }
 
   worker_multi_float128(int capacity): worker_multi(Type::typeFloat128, capacity),
-      storage(new __float128[capacity+4]) {}
-  worker_multi_float128(worker_multi *source);
-  ~worker_multi_float128();
-  virtual Type ntype() override { return typeDouble; }
+      storage(new __float128[capacity]) {}
+  worker_multi_float128(Allocator *source);
+  virtual ~worker_multi_float128();
+  virtual Type ntype() override { return typeFloat128; }
   /*virtual number_pointer alloc() override;
   virtual void alloc_array(int count) override;
   virtual void dealloc(number_pointer store) override;
   virtual void dealloc_array(int count) override;*/
+  virtual void assign_block(int dst, worker_multi *src_worker, int src, int len) override; //for now, assert(this.ntype==src.ntype)
+  const __float128 *_getStorage() { return storage; }
 
   //void init_(number_store *store, void *placement, double val=0) override;
   void zero(const number_pointer store, double val=0) override;
@@ -290,10 +296,11 @@ protected:
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
 public:
   double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
+
   worker_multi_ddouble(int capacity): worker_multi(Type::typeDDouble, capacity),
-    storage(new dd_real[capacity+4]) {}
-  worker_multi_ddouble(worker_multi *source);
-  ~worker_multi_ddouble();
+    storage(new dd_real[capacity]) {}
+  worker_multi_ddouble(Allocator *source);
+  virtual ~worker_multi_ddouble();
   //{ assert((store->dbgType==Type::typeDDouble) ||
   //         (store->dbgType==Type::typeEmpty)); }
   virtual Type ntype() override { return typeDDouble; }
@@ -301,6 +308,8 @@ public:
   virtual void alloc_array(int count) override;
   virtual void dealloc(number_pointer store) override;
   virtual void dealloc_array(int count) override;*/
+  virtual void assign_block(int dst, worker_multi *src_worker, int src, int len) override; //for now, assert(this.ntype==src.ntype)
+  const dd_real *_getStorage() { return storage; }
 
   //void init_(number_store *store, void *placement, double val=0) override;
   void zero(const number_pointer store, double val=0) override;
@@ -349,8 +358,8 @@ public:
   double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
   worker_multi_qdouble(int capacity): worker_multi(Type::typeQDouble, capacity),
     storage(new dq_real[capacity+4]) {}
-  worker_multi_qdouble(worker_multi *source);
-  ~worker_multi_qdouble();
+  worker_multi_qdouble(Allocator *source);
+  virtual ~worker_multi_qdouble();
   //{ assert((store->dbgType==Type::typeDDouble) ||
   //         (store->dbgType==Type::typeEmpty)); }
   virtual Type ntype() override { return typeQDouble; }
@@ -358,6 +367,8 @@ public:
   virtual void alloc_array(int count) override;
   virtual void dealloc(number_pointer store) override;
   virtual void dealloc_array(int count) override;*/
+  virtual void assign_block(int dst, worker_multi *src_worker, int src, int len) override; //for now, assert(this.ntype==src.ntype)
+  const dq_real *_getStorage() { return storage; }
 
   //void init_(number_store *store, void *placement, double val=0) override;
   void zero(const number_pointer store, double val=0) override;

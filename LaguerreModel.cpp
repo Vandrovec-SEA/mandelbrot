@@ -238,7 +238,30 @@ void LaguerreModel::setParams(ShareableViewInfo viewInfo)
       params_->base.assign(&tmpinfo.c);
       params_->root.assign(&tmpinfo.root);
     } break;
-
+    case MandelMath::worker_multi::Type::typeFloat128:
+    {
+      //watch this
+      MandelMath::worker_multi_float128 tmpworker(viewInfo.originalAllocator);
+      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
+      params_->base.assign(&tmpinfo.c);
+      params_->root.assign(&tmpinfo.root);
+    } break;
+    case MandelMath::worker_multi::Type::typeDDouble:
+    {
+      //watch this
+      MandelMath::worker_multi_ddouble tmpworker(viewInfo.originalAllocator);
+      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
+      params_->base.assign(&tmpinfo.c);
+      params_->root.assign(&tmpinfo.root);
+    } break;
+    case MandelMath::worker_multi::Type::typeQDouble:
+    {
+      //watch this
+      MandelMath::worker_multi_qdouble tmpworker(viewInfo.originalAllocator);
+      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
+      params_->base.assign(&tmpinfo.c);
+      params_->root.assign(&tmpinfo.root);
+    } break;
   }
   MandelMath::complex old_c(currentWorker);
   old_c.assign(&position_->center);
@@ -1070,16 +1093,16 @@ void LaguerreModel::selectedPrecisionChanged()
         break;
 #if !ONLY_DOUBLE_WORKER
       case precisionFloat128:
-        newWorker=new MandelMath::worker_multi_float128(currentWorker_);
-        newStoreWorker=empty?nullptr:new MandelMath::worker_multi_float128(storeWorker);
+        newWorker=new MandelMath::worker_multi_float128(currentWorker->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_float128(storeWorker->getAllocator());
         break;
       case precisionDDouble:
-        newWorker=new MandelMath::worker_multi_ddouble(currentWorker_);
-        newStoreWorker=empty?nullptr:new MandelMath::worker_multi_ddouble(storeWorker);
+        newWorker=new MandelMath::worker_multi_ddouble(currentWorker->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_ddouble(storeWorker->getAllocator());
         break;
       case precisionQDouble:
-        newWorker=new MandelMath::worker_multi_qdouble(currentWorker_);
-        newStoreWorker=empty?nullptr:new MandelMath::worker_multi_qdouble(storeWorker);
+        newWorker=new MandelMath::worker_multi_qdouble(currentWorker->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_qdouble(storeWorker->getAllocator());
         break;
 #endif
     }
@@ -1106,15 +1129,15 @@ void LaguerreModel::selectedPrecisionChanged()
 #if !ONLY_DOUBLE_WORKER
       case precisionFloat128:
         newWorker=new MandelMath::worker_multi_float128(LaguerreModel::LEN);
-        newStoreWorker=pointCount==0?nullptr:new MandelMath::worker_multi_float128(pointCount*LaguerrePoint::LEN);
+        newStoreWorker=new MandelMath::worker_multi_float128(pointCount*LaguerrePoint::LEN);
         break;
       case precisionDDouble:
         newWorker=new MandelMath::worker_multi_ddouble(LaguerreModel::LEN);
-        newStoreWorker=pointCount==0?nullptr:new MandelMath::worker_multi_ddouble(pointCount*LaguerrePoint::LEN);
+        newStoreWorker=new MandelMath::worker_multi_ddouble(pointCount*LaguerrePoint::LEN);
         break;
       case precisionQDouble:
         newWorker=new MandelMath::worker_multi_qdouble(LaguerreModel::LEN);
-        newStoreWorker=pointCount==0?nullptr:new MandelMath::worker_multi_qdouble(pointCount*LaguerrePoint::LEN);
+        newStoreWorker=new MandelMath::worker_multi_qdouble(pointCount*LaguerrePoint::LEN);
         break;
 #endif
     }
@@ -1144,7 +1167,7 @@ void LaguerreModel::selectedPrecisionChanged()
   threads=new MandelEvaluator *[threadCount];
   for (int t=0; t<threadCount; t++)
   {
-    threads[t]=new MandelEvaluator(newWorker->ntype());
+    threads[t]=new MandelEvaluator(newWorker->ntype(), false);
     //threads[t].setHint(t);
     QObject::connect(threads[t], &MandelEvaluator::doneNewton,
                      this, &LaguerreModel::donePixel,
@@ -1324,7 +1347,7 @@ void LaguerreModel::Position::pixelYtoIM(int y, MandelMath::number_pointer resul
 
 
 LaguerreModel::Orbit::Orbit(MandelMath::worker_multi::Allocator *allocator): currentWorker(allocator->worker),
-  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype()),
+  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype(), true),
   /*pointAllocator(allocator, LaguerrePoint::LEN),*/ pointDataStore(), pointData(&pointDataStore, allocator, nullptr),
   first_mu_re_(0), first_mu_im(0), first_mum_re_(0), first_mum_im_(0)
 {

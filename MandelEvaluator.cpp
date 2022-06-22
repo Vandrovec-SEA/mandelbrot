@@ -1387,7 +1387,7 @@ bool MandelLoopEvaluator::eval2zzc(int period, const MandelMath::complex *c, con
 
 
 
-MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype): QThread(nullptr),
+MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dontRun): QThread(nullptr),
   currentWorker(MandelMath::worker_multi::create(ntype, LEN)),
   params_allocator(currentWorker->getAllocator(), ComputeParams::LEN), currentParams(&params_allocator),
   /*currentDataAllocator(currentWorker->getAllocator(), MandelPoint::LEN),*/ currentData(&currentDataStore, currentWorker->getAllocator(), nullptr),
@@ -1398,7 +1398,8 @@ MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype): QThread(
   /*interior_allocator(&self_allocator, InteriorInfo::LEN),*/ interior(currentWorker->getAllocator(), nullptr),
   /*bulb_allocator(&self_allocator, Bulb::LEN),*/ bulb(currentWorker->getAllocator(), nullptr)
 {
-  QThread::start(QThread::Priority::LowestPriority);
+  if (!dontRun)
+    QThread::start(QThread::Priority::LowestPriority);
   assert(currentWorker->getAllocator()->checkFill());
   wantStop=false;
   pointsComputed=0;
@@ -1406,7 +1407,8 @@ MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype): QThread(
   timeInnerTotal=0;
   timeInvokePostTotal=0;
   timeInvokeSwitchTotal=0;
-  QObject::moveToThread(this);
+  if (!dontRun)
+    QObject::moveToThread(this);
 }
 
 MandelEvaluator::~MandelEvaluator()

@@ -1546,16 +1546,16 @@ void MandelModel::selectedPrecisionChanged()
         break;
 #if !ONLY_DOUBLE_WORKER
       case precisionFloat128:
-        newWorker=new MandelMath::worker_multi_float128(currentWorker_);
-        newStoreWorker=new MandelMath::worker_multi_float128(storeWorker);
+        newWorker=new MandelMath::worker_multi_float128(currentWorker->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_float128(storeWorker->getAllocator());
         break;
       case precisionDDouble:
-        newWorker=new MandelMath::worker_multi_ddouble(currentWorker_);
-        newStoreWorker=new MandelMath::worker_multi_ddouble(storeWorker);
+        newWorker=new MandelMath::worker_multi_ddouble(currentWorker->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_ddouble(storeWorker->getAllocator());
         break;
       case precisionQDouble:
-        newWorker=new MandelMath::worker_multi_qdouble(currentWorker_);
-        newStoreWorker=new MandelMath::worker_multi_qdouble(storeWorker);
+        newWorker=new MandelMath::worker_multi_qdouble(currentWorker->getAllocator());
+        newStoreWorker=new MandelMath::worker_multi_qdouble(storeWorker->getAllocator());
         break;
 #endif
     }
@@ -1581,16 +1581,16 @@ void MandelModel::selectedPrecisionChanged()
         break;
 #if !ONLY_DOUBLE_WORKER
       case precisionFloat128:
-        newWorker=new MandelMath::worker_multi_float128(MandelModel::LEN+threadCount*MandelEvaluator::LEN);
-        newStoreWorker=pointCount==new MandelMath::worker_multi_float128(pointCount*MandelPoint::LEN);
+        newWorker=new MandelMath::worker_multi_float128(MandelModel::LEN);
+        newStoreWorker=new MandelMath::worker_multi_float128(pointCount*MandelPoint::LEN);
         break;
       case precisionDDouble:
         newWorker=new MandelMath::worker_multi_ddouble(MandelModel::LEN+threadCount*MandelEvaluator::LEN);
-        newStoreWorker=pointCount==new MandelMath::worker_multi_ddouble(pointCount*MandelPoint::LEN);
+        newStoreWorker=new MandelMath::worker_multi_ddouble(pointCount*MandelPoint::LEN);
         break;
       case precisionQDouble:
         newWorker=new MandelMath::worker_multi_qdouble(MandelModel::LEN+threadCount*MandelEvaluator::LEN);
-        newStoreWorker=pointCount==new MandelMath::worker_multi_qdouble(pointCount*MandelPoint::LEN);
+        newStoreWorker=new MandelMath::worker_multi_qdouble(pointCount*MandelPoint::LEN);
         break;
 #endif
     }
@@ -1601,9 +1601,9 @@ void MandelModel::selectedPrecisionChanged()
     MandelMath::worker_multi::Allocator *newshareableViewInfoAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), ShareableViewInfo::LEN);
     MandelMath::worker_multi::Allocator *newshareableVIAuser=new MandelMath::worker_multi::Allocator(newshareableViewInfoAllocator, ShareableViewInfo::LEN);
     MandelPoint *newWtiPoint=new MandelPoint(nullptr, newWorker->getAllocator(), nullptr);
-    Position *newPosition=new Position(newWorker->getAllocator());
+    Position *newPosition=new Position(newWorker->getAllocator(), position_);
     Orbit *newOrbit=new Orbit(newWorker->getAllocator());
-    newPosition->assign(position_);
+    //newPosition->assign(position_);
     delete orbit_;
     delete position_;
     delete wtiPoint;
@@ -1619,7 +1619,7 @@ void MandelModel::selectedPrecisionChanged()
   threads=new MandelEvaluator *[threadCount];
   for (int t=0; t<threadCount; t++)
   {
-    threads[t]=new MandelEvaluator(newWorker->ntype());
+    threads[t]=new MandelEvaluator(newWorker->ntype(), false);
     //threads[t].setHint(t);
     QObject::connect(threads[t], &MandelEvaluator::doneCompute,
                      this, &MandelModel::donePixel,
@@ -1637,12 +1637,30 @@ void MandelModel::selectedPrecisionChanged()
   startNewEpoch();
 }
 
-MandelModel::Position::Position(MandelMath::worker_multi::Allocator *allocator):
+/*MandelModel::Position::Position(MandelMath::worker_multi::Allocator *allocator):
   worker(allocator->worker), center(allocator)
 {
   center.zero(-0.5, 0.0);
   step_log=7;
   step_size__=1.0/128;
+  updateCachedDepth();
+}*/
+
+MandelModel::Position::Position(MandelMath::worker_multi::Allocator *allocator, Position *src):
+  worker(allocator->worker), center(allocator)
+{
+  if (src)
+  {
+    //keep preinitialized values center.zero(-0.5, 0.0);
+    step_log=src->step_log;
+    step_size__=src->step_size__;
+  }
+  else
+  {
+    center.zero(-0.5, 0.0);
+    step_log=7;
+    step_size__=1.0/128;
+  }
   updateCachedDepth();
 }
 
@@ -1653,15 +1671,6 @@ MandelModel::Position::~Position()
     worker->cleanup(&center_re_s);
     worker->cleanup(&center_im_s);
   };*/
-}
-
-void MandelModel::Position::assign(Position *src)
-{
-  if (src!=nullptr)
-  {
-    step_log=src->step_log;
-    step_size__=src->step_size__;
-  }
 }
 
 void MandelModel::Position::setView(const MandelMath::complex *c, double scale)
@@ -1779,7 +1788,7 @@ void MandelModel::Position::pixelYtoIM(int y, MandelMath::number_pointer result)
 
 
 MandelModel::Orbit::Orbit(MandelMath::worker_multi::Allocator *allocator): currentWorker(allocator->worker),
-  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype()),
+  /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype(), true),
   //pointAllocator(allocator, MandelPoint::LEN), //pointDataStore(), pointData(&pointDataStore, &pointAllocator),
   lagu_c(allocator), lagu_r(allocator), tmp(allocator), bulb(allocator)
 {
