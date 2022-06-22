@@ -1024,8 +1024,8 @@ void worker_multi_float128::sqr(const number_pointer store)
 
 double worker_multi_float128::radixfloor(const number_pointer_c store1, const number_pointer_c store2)
 {
-  int ilog1=std::ilogb(*store1.asf64);
-  int ilog2=std::ilogb(*store2.asf64);
+  int ilog1=std::ilogb((double)*store1.asf128);
+  int ilog2=std::ilogb((double)*store2.asf128);
   if (ilog1<ilog2)
     ilog1=ilog2;
   return ldexp(1, ilog1);
