@@ -75,7 +75,7 @@ Window {
                 model: ListModel {
                     id: paintstyle_model
                     ListElement { text: "Kind"; key: 0 }//mandelModel.paintStyleKind }
-                    ListElement { text: "Cls"; key: 1 }//mandelModel.paintStyleCls }
+                    ListElement { text: "Classic"; key: 1 }//mandelModel.paintStyleCls }
                     ListElement { text: "Exter"; key: 2 }//mandelModel.paintStyleExter  }
                     ListElement { text: "Inter"; key: 3 }//mandelModel.paintStyleInter  }
                     ListElement { text: "Near"; key: 4 }//mandelModel.paintStyleNear  }
@@ -101,6 +101,7 @@ Window {
                     ListElement { text: "Float128"; key: 1 }
                     ListElement { text: "DDouble"; key: 2 }
                     ListElement { text: "QDouble"; key: 3 }
+                    ListElement { text: "Real642"; key: 4 }
                 }
                 onActivated:
                 {

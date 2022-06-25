@@ -29,7 +29,7 @@ void LaguerrePointStore::assign(const LaguerrePointStore *src)
 }
 
 
-LaguerrePoint::LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+LaguerrePoint::LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN),
   store(store), f(&self_allocator), fz_r(&self_allocator)
 {
@@ -151,7 +151,7 @@ void MandelPointStore::assign(const MandelPointStore *src)
   interior=src->interior;
 }
 
-MandelPoint::MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelPoint::MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN),
   store(store), f(&self_allocator), fc_c(&self_allocator), fz_r(&self_allocator), fz_c_mag(&self_allocator),
   lookper_startf(&self_allocator), lookper_nearr_dist(&self_allocator), lookper_totalFzmag(&self_allocator),
@@ -325,7 +325,7 @@ void MandelPoint::promote(MandelMath::number_worker::Type oldType, MandelMath::n
 }*/
 
 ShareableViewInfo::ShareableViewInfo(MandelMath::worker_multi::Allocator *allocator): QObject(),
-  selfAllocator(allocator, 0, LEN, nullptr),
+  selfAllocator(allocator, 0, LEN),
   originalAllocator(allocator),
   c(&selfAllocator), root(&selfAllocator), scale(1), period(0)
 {
@@ -333,7 +333,7 @@ ShareableViewInfo::ShareableViewInfo(MandelMath::worker_multi::Allocator *alloca
 }
 
 ShareableViewInfo::ShareableViewInfo(ShareableViewInfo &src): QObject(),
-  selfAllocator(src.originalAllocator, 0, LEN, nullptr),
+  selfAllocator(src.originalAllocator, 0, LEN),
   originalAllocator(src.originalAllocator),
   c(&selfAllocator), root(&selfAllocator),
   scale(src.scale), period(src.period)
@@ -341,12 +341,12 @@ ShareableViewInfo::ShareableViewInfo(ShareableViewInfo &src): QObject(),
 }
 
 ShareableViewInfo::ShareableViewInfo(const ShareableViewInfo &src): ShareableViewInfo((ShareableViewInfo &)src)
-{
-  //why do you need this?
+{ //why do you need this?
+  nop();
 }
 
 ShareableViewInfo::ShareableViewInfo(ShareableViewInfo &&src): QObject(),
-  selfAllocator(src.originalAllocator, 0, LEN, nullptr),
+  selfAllocator(src.originalAllocator, 0, LEN),
   originalAllocator(src.originalAllocator),
   c(&selfAllocator), root(&selfAllocator),
   scale(src.scale), period(src.period)
@@ -355,13 +355,19 @@ ShareableViewInfo::ShareableViewInfo(ShareableViewInfo &&src): QObject(),
 
 ShareableViewInfo &ShareableViewInfo::operator=(ShareableViewInfo &src)
 {
-  assert(originalAllocator==src.originalAllocator);
+  /*assert(originalAllocator==src.originalAllocator);
   scale=src.scale;
   period=src.period;
   assert(c.re.asf64==src.c.re.asf64);
   assert(c.im.asf64==src.c.im.asf64);
   assert(root.re.asf64==src.root.re.asf64);
-  assert(root.im.asf64==src.root.im.asf64);
+  assert(root.im.asf64==src.root.im.asf64);*/
+  originalAllocator=src.originalAllocator;
+  scale=src.scale;
+  period=src.period;
+  /*don't need at all, will allocate again c.re=src.c.re;
+  c.im=src.c.im;
+  root=src.root; //we're talking memcpy here */
   /*c.assign(src.)
   originalAllocator->worker->assign()
   assert(c.re.asf64==nullptr);
@@ -386,7 +392,7 @@ ShareableViewInfo &ShareableViewInfo::operator=(ShareableViewInfo &&src)
   return operator=((ShareableViewInfo &)src);
 }
 
-LaguerreStep::LaguerreStep(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+LaguerreStep::LaguerreStep(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN), currentWorker(allocator->worker),
   step(&self_allocator), s1(&self_allocator), s2(&self_allocator), tmp1(&self_allocator), tmp2(&self_allocator),
   laguG(&self_allocator), laguG2(&self_allocator), laguH(&self_allocator), laguX(&self_allocator), fzzf(&self_allocator)
@@ -483,7 +489,7 @@ LaguerreStep::LaguerreStep(MandelMath::worker_multi::Allocator *allocator, Mande
 
 bool LaguerreStep::eval(int lg2_degree, const MandelMath::complex *f, const MandelMath::complex *f_z, const MandelMath::complex *f_zz)
 {
-  if (currentWorker->is0(f->re) && currentWorker->is0(f->im))
+  if (f->is0())
   {
     step.zero(0, 0);
     return true;
@@ -875,7 +881,7 @@ bool LaguerreStep::eval(int lg2_degree, const MandelMath::complex *f, const Mand
     //  we can leave this to the caller
     //return 0;
   };
-  if (!currentWorker->is0(f_z->re) || !currentWorker->is0(f_z->im)) //gz_r_mag!=0)
+  if (!f_z->is0()) //gz_r_mag!=0)
   {
     //newton near multiroot:
     //f=(x-a)^m   f'=m*(x-a)^(m-1)  f/f'=(x-a)/m
@@ -952,7 +958,7 @@ bool LaguerreStep::eval(int lg2_degree, const MandelMath::complex *f, const Mand
   return true;
 }
 
-MandelLoopEvaluator::MandelLoopEvaluator(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelLoopEvaluator::MandelLoopEvaluator(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN), currentWorker(allocator->worker),
   f(&self_allocator), f_z(&self_allocator), f_c(&self_allocator),
   f_zz(&self_allocator), f_zc(&self_allocator), f_cc(&self_allocator), f_zzc(&self_allocator),
@@ -1390,13 +1396,13 @@ bool MandelLoopEvaluator::eval2zzc(int period, const MandelMath::complex *c, con
 MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dontRun): QThread(nullptr),
   currentWorker(MandelMath::worker_multi::create(ntype, LEN)),
   params_allocator(currentWorker->getAllocator(), ComputeParams::LEN), currentParams(&params_allocator),
-  /*currentDataAllocator(currentWorker->getAllocator(), MandelPoint::LEN),*/ currentData(&currentDataStore, currentWorker->getAllocator(), nullptr),
-  tmpLaguerrePoint(nullptr, currentWorker->getAllocator(), nullptr),
-  /*newtres_allocator(&self_allocator, NewtRes::LEN),*/ newtres_(currentWorker->getAllocator(), nullptr),
-  /*eval_allocator(&self_allocator, Eval::LEN),*/ eval(currentWorker->getAllocator(), nullptr),
-  /*newt_allocator(&self_allocator, Newt::LEN),*/ newt(currentWorker->getAllocator(), nullptr),
-  /*interior_allocator(&self_allocator, InteriorInfo::LEN),*/ interior(currentWorker->getAllocator(), nullptr),
-  /*bulb_allocator(&self_allocator, Bulb::LEN),*/ bulb(currentWorker->getAllocator(), nullptr)
+  /*currentDataAllocator(currentWorker->getAllocator(), MandelPoint::LEN),*/ currentData(&currentDataStore, currentWorker->getAllocator()),
+  tmpLaguerrePoint(nullptr, currentWorker->getAllocator()),
+  /*newtres_allocator(&self_allocator, NewtRes::LEN),*/ newtres_(currentWorker->getAllocator()),
+  /*eval_allocator(&self_allocator, Eval::LEN),*/ eval(currentWorker->getAllocator()),
+  /*newt_allocator(&self_allocator, Newt::LEN),*/ newt(currentWorker->getAllocator()),
+  /*interior_allocator(&self_allocator, InteriorInfo::LEN),*/ interior(currentWorker->getAllocator()),
+  /*bulb_allocator(&self_allocator, Bulb::LEN),*/ bulb(currentWorker->getAllocator())
 {
   if (!dontRun)
     QThread::start(QThread::Priority::LowestPriority);
@@ -2364,7 +2370,7 @@ solve [0=0+d*C+e*R*C+f*C^2/2+g*R^3/6+h*R^2*C/2, -1=e*C+g*R^2/2+h*R*C, -124.79612
         break;
       }
 #endif
-      if (currentWorker->is0(bulbe.f.re) && currentWorker->is0(bulbe.f.im))
+      if (bulbe.f.is0())
         break;
       if (!lagu.eval(period, &bulbe.f, &bulbe.f_z, &bulbe.f_zz))
       {
@@ -2436,7 +2442,7 @@ solve [0=0+d*C+e*R*C+f*C^2/2+g*R^3/6+h*R^2*C/2, -1=e*C+g*R^2/2+h*R*C, -124.79612
           };
           bulbe.f.sub(rb);
           currentWorker->add_double(bulbe.f_z.re, -1);
-          if (currentWorker->is0(bulbe.f.re) && currentWorker->is0(bulbe.f.im))
+          if (bulbe.f.is0())
             break;
           if (!lagu.eval(period, &bulbe.f, &bulbe.f_z, &bulbe.f_zz))
           {
@@ -2647,13 +2653,13 @@ solve [0=0+d*C+e*R*C+f*C^2/2+g*R^3/6+h*R^2*C/2, -1=e*C+g*R^2/2+h*R*C, -124.79612
   */
 }
 
-MandelEvaluator::Bulb::Bulb(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelEvaluator::Bulb::Bulb(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN), currentWorker(allocator->worker),
-  bulbe(&self_allocator, nullptr), rb(&self_allocator), cb(&self_allocator), xc(&self_allocator),
+  bulbe(&self_allocator), rb(&self_allocator), cb(&self_allocator), xc(&self_allocator),
   cbx(&self_allocator), rbx(&self_allocator), baseZC(&self_allocator), baseCC(&self_allocator),
   s1(&self_allocator), s2(&self_allocator), s3(&self_allocator), deltac(&self_allocator), deltar(&self_allocator),
   B(&self_allocator), C(&self_allocator), dbg_first_cb(&self_allocator), dbg_first_rb(&self_allocator),
-  target_f_z(&self_allocator), dbg_guessmult(0), lagu(&self_allocator, nullptr)
+  target_f_z(&self_allocator), dbg_guessmult(0), lagu(&self_allocator)
 {
   assert(self_allocator.checkFill());
 }
@@ -3950,7 +3956,7 @@ int MandelEvaluator::estimateInterior(int period, const MandelMath::complex *c, 
   newt.tmp1.mul(&fc);
   newt.tmp1.mul(&fzz);
   newt.tmp1.add(&fzc);
-  if (currentWorker->is0(newt.tmp1.re) && currentWorker->is0(newt.tmp1.im))
+  if (newt.tmp1.is0())
   { //probably wrong period, should not happen
     interior.inte_abs.zero(5);
     interior.inte.zero(5, 0);
@@ -4145,6 +4151,8 @@ void MandelEvaluator::evaluate()
     //currentData.iter++;
     f_mag=currentData.f.getMag_tmp_();
 
+    if ((currentData.store->iter+2)%231==0)
+      nop();
     if (!currentWorker->isle(eval.near0fmag.ptr, f_mag)) //f_mag<near0fmag
     {
       currentData.store->near0iter=currentData.store->iter+2;
@@ -4165,8 +4173,8 @@ void MandelEvaluator::evaluate()
       } break;
       case 0:
       {
-        if (!currentData.store->lookper_nearr_dist_touched)
-        {
+        if (!currentData.store->lookper_nearr_dist_touched) //we need to stop increasing lastGuess and restart search
+        {                                                   //and also retest period once after new lookper_start
           eval.lookper_nearr.assign(&currentData.f);
           currentData.lookper_nearr_dist.assign(lpdiff);
           currentData.store->lookper_nearr_dist_touched=true;
@@ -4259,14 +4267,14 @@ MandelEvaluator::ComputeParams::ComputeParams(MandelMath::worker_multi::Allocato
 {
 }
 
-MandelEvaluator::NewtRes::NewtRes(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelEvaluator::NewtRes::NewtRes(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN), cyclesNeeded(-1),
   fz_r(&self_allocator), first_guess_lagu(&self_allocator), first_guess_newt(&self_allocator)
 {
   assert(self_allocator.checkFill());
 }
 
-MandelEvaluator::Eval::Eval(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelEvaluator::Eval::Eval(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN),
   fz_r(&self_allocator), fz_mag1(&self_allocator),
   near0fmag(&self_allocator), lookper_nearr(&self_allocator)
@@ -4274,7 +4282,7 @@ MandelEvaluator::Eval::Eval(MandelMath::worker_multi::Allocator *allocator, Mand
   assert(self_allocator.checkFill());
 }
 
-MandelEvaluator::Newt::Newt(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelEvaluator::Newt::Newt(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN),
   bestr(&self_allocator), f_r(&self_allocator), fzz_r(&self_allocator), tmp1(&self_allocator),
   laguH(&self_allocator), laguG(&self_allocator), laguG2(&self_allocator),
@@ -4283,7 +4291,7 @@ MandelEvaluator::Newt::Newt(MandelMath::worker_multi::Allocator *allocator, Mand
   assert(self_allocator.checkFill());
 }
 
-MandelEvaluator::InteriorInfo::InteriorInfo(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *):
+MandelEvaluator::InteriorInfo::InteriorInfo(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN),
   inte(&self_allocator), inte_abs(&self_allocator), fz(&self_allocator), fz_mag(&self_allocator)
 {

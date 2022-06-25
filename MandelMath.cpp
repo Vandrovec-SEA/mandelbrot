@@ -252,7 +252,7 @@ worker_multi::Allocator::Allocator(int capacity):
 {
 }
 
-worker_multi::Allocator::Allocator(worker_multi *worker, int capacity, MandelMath::upgrademe *):
+worker_multi::Allocator::Allocator(worker_multi *worker, int capacity):
   lowest(0), allocUpTo(0), capacity(capacity), above(nullptr), worker(worker)
 {
 }
@@ -264,7 +264,7 @@ worker_multi::Allocator::Allocator(Allocator *allo, int capacity):
   assert(allo->allocUpTo<=allo->lowest+allo->capacity);
 }
 
-worker_multi::Allocator::Allocator(Allocator *allo, int lowest, int count, upgrademe *):
+worker_multi::Allocator::Allocator(Allocator *allo, int lowest, int count):
   lowest(allo->lowest+lowest), allocUpTo(allo->lowest+lowest), capacity(count), above(nullptr), worker(allo->worker)
 {
   assert(lowest>=allo->lowest);
@@ -596,6 +596,32 @@ worker_multi *worker_multi::create(Type ntype, int capacity)
       return new worker_multi_ddouble(capacity);
     case Type::typeQDouble:
       return new worker_multi_qdouble(capacity);
+    case Type::typeReal642:
+      return new worker_multi_real642(capacity);
+#endif
+  }
+}
+
+worker_multi *worker_multi::create(Type ntype, Allocator *allocator)
+{
+  switch (ntype)
+  {
+    default://case Type::typeEmpty:
+      dbgPoint();
+      goto lolwut;
+#if NUMBER_DOUBLE_EXISTS
+    case Type::typeDouble: lolwut:
+      return new worker_multi_double(allocator);
+#endif
+#if !ONLY_DOUBLE_WORKER
+    case Type::typeFloat128:
+      return new worker_multi_float128(allocator);
+    case Type::typeDDouble:
+      return new worker_multi_ddouble(allocator);
+    case Type::typeQDouble:
+      return new worker_multi_qdouble(allocator);
+    case Type::typeReal642:
+      return new worker_multi_real642(allocator);
 #endif
   }
 }
@@ -646,6 +672,14 @@ worker_multi_double::worker_multi_double(Allocator *source):
       for (int i=0; i<capacity; i++)
       {
         storage[i]=src_storage[oldfirst+i].hi;
+      }
+    } break;
+    case Type::typeReal642:
+    {
+      const real642 *src_storage=specific_cast<worker_multi_real642 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=src_storage[oldfirst+i].val1;
       }
     } break;
 #endif
@@ -879,6 +913,14 @@ worker_multi_float128::worker_multi_float128(Allocator *source):
       for (int i=0; i<capacity; i++)
       {
         storage[i]=src_storage[oldfirst+i].hi+(__float128)src_storage[oldfirst+i].lo_;
+      }
+    } break;
+    case Type::typeReal642:
+    {
+      const real642 *src_storage=specific_cast<worker_multi_real642 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i]=src_storage[oldfirst+i].val1;
       }
     } break;
   }
@@ -1176,6 +1218,15 @@ worker_multi_ddouble::worker_multi_ddouble(Allocator *source):
         storage[i].assign(src_storage[oldfirst+i]);
       }
     } break;
+    case Type::typeReal642:
+    {
+      const real642 *src_storage=specific_cast<worker_multi_real642 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].hi=src_storage[oldfirst+i].val1;
+        storage[i].lo_=0;
+      }
+    } break;
   }
 }
 
@@ -1412,6 +1463,15 @@ worker_multi_qdouble::worker_multi_qdouble(Allocator *source):
         storage[i].assign(src_storage[oldfirst+i]);
       }
     } break;
+    case Type::typeReal642:
+    {
+      const real642 *src_storage=specific_cast<worker_multi_real642 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].hi=src_storage[oldfirst+i].val1;
+        storage[i].lo_=0;
+      }
+    } break;
   }
 }
 
@@ -1588,6 +1648,308 @@ double worker_multi_qdouble::toDouble(const number_pointer_c store)
 {
   return store.asqd->hi;
 }
+
+
+
+
+
+worker_multi_real642::worker_multi_real642(Allocator *source):
+  worker_multi(Type::typeReal642, specific_cast<worker_multi_real642 *, worker_multi *>(source->worker)->capacity)
+{
+  int oldfirst, oldlast;
+  source->_getRange(oldfirst, oldlast);
+  storage=new real642[oldlast-oldfirst];
+  switch (source->worker->ntype())
+  {
+    case Type::typeEmpty:
+    {
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].val1=0;
+        storage[i].val2=0;
+      }
+    } break;
+    case Type::typeDouble:
+    {
+      const double *src_storage=specific_cast<worker_multi_double *, worker_multi *>(source->worker)->_getStorage();
+      //TODO: memmove but we'll see later
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].val1=src_storage[oldfirst+i];
+        storage[i].val2=src_storage[oldfirst+i];
+      }
+    } break;
+    case Type::typeFloat128:
+    {
+      const __float128 *src_storage=specific_cast<worker_multi_float128 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].val1=src_storage[oldfirst+i];
+        storage[i].val2=src_storage[oldfirst+i];
+      }
+    } break;
+    case Type::typeDDouble:
+    {
+      const dd_real *src_storage=specific_cast<worker_multi_ddouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].val1=src_storage[oldfirst+i].hi;
+        storage[i].val2=src_storage[oldfirst+i].hi+(__float128)src_storage[oldfirst+i].lo_;
+      }
+    } break;
+    case Type::typeQDouble:
+    {
+      const dq_real *src_storage=specific_cast<worker_multi_qdouble *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].val1=src_storage[oldfirst+i].hi;
+        storage[i].val2=src_storage[oldfirst+i].hi+(__float128)src_storage[oldfirst+i].lo_;
+      }
+    } break;
+    case Type::typeReal642:
+    {
+      const real642 *src_storage=specific_cast<worker_multi_real642 *, worker_multi *>(source->worker)->_getStorage();
+      for (int i=0; i<capacity; i++)
+      {
+        storage[i].val1=src_storage[oldfirst+i].val1;
+        storage[i].val2=src_storage[oldfirst+i].val2;
+      }
+    } break;
+  }
+}
+
+worker_multi_real642::~worker_multi_real642()
+{
+  delete[] storage;
+  storage=nullptr;
+}
+
+number_pointer worker_multi_real642::getNumber(int index)
+{
+  assert(allocator.checkIndex(index));
+  assert(index>=0 && index<capacity);
+  return number_pointer(&storage[index]);
+}
+
+void worker_multi_real642::getTmp12(number_pointer &t1, number_pointer &t2)
+{
+  t1.as642=&tmp1;
+  t2.as642=&tmp2;
+}
+
+void worker_multi_real642::assign_block(int dst, worker_multi *src_worker, int src, int len)
+{
+  assert(src_worker->ntype()==Type::typeReal642);
+  worker_multi_real642 *access=(worker_multi_real642 *)src_worker;
+  assert(allocator.checkIndex(dst));
+  assert(allocator.checkIndex(dst+len-1));
+  assert(access->allocator.checkIndex(src));
+  assert(access->allocator.checkIndex(src+len-1));
+  assert(dst>=0 && dst+len<=capacity);
+  assert(src>=0 && src+len<=access->capacity);
+
+  for (int i=0; i<len; i++)
+    storage[dst+i]=access->storage[src+i];
+}
+
+void worker_multi_real642::zero(const number_pointer store, double val)
+{
+  store.as642->val1=val;
+  store.as642->val2=val;
+}
+
+void worker_multi_real642::assign(const number_pointer store, const number_pointer_c src)
+{
+  *store.as642=*src.as642;
+}
+
+void worker_multi_real642::chs(const number_pointer store)
+{
+  store.as642->val1 = -store.as642->val1;
+  store.as642->val2 = -store.as642->val2;
+}
+
+void worker_multi_real642::lshift(const number_pointer store, int shoft)
+{
+  //*store.asf128=ldexp(*store.asf128, shoft);
+  //could try ldexp only on upper half but...
+  store.as642->val1=ldexp(store.as642->val1, shoft);
+  if (store.as642->val2 != 0) //don't play with 0's exponent or you get NaN
+    ((uint16_t *)&store.as642->val2)[7]+=shoft;
+}
+
+void worker_multi_real642::round(const number_pointer store)
+{
+  store.as642->val1=std::round(store.as642->val1);
+  __float128 remainder=store.as642->val2;
+  store.as642->val2=0;
+  for (;;)
+  {
+    double some=std::round((double)remainder);
+    if (some==0)
+      break;
+    store.as642->val2+=some;
+    remainder-=some;
+  }
+}
+
+void worker_multi_real642::frac(const number_pointer store)
+{
+  if (store.as642->val1<0)
+    store.as642->val1 -= ceil(store.as642->val1);
+  else
+    store.as642->val1 -= floor(store.as642->val1);
+  if (store.as642->val2<0)
+  {
+    double some=ceil((double)store.as642->val2);
+    while (some)
+    {
+      store.as642->val2 -= some;
+      some=ceil((double)store.as642->val2);
+    }
+  }
+  else
+  {
+    double some=floor((double)store.as642->val2);
+    while (some)
+    {
+      store.as642->val2 -= some;
+      some=floor((double)store.as642->val2);
+    }
+  }
+}
+
+void worker_multi_real642::mod1(const number_pointer store)
+{
+  store.as642->val1 -= floor(store.as642->val1);
+  double some=floor((double)store.as642->val2);
+  while (some)
+  {
+    store.as642->val2 -= some;
+    some=floor((double)store.as642->val2);
+  }
+}
+
+void worker_multi_real642::add_double(const number_pointer store, double x)
+{
+  store.as642->val1 += x;
+  store.as642->val2 += x;
+}
+
+void worker_multi_real642::mul_double(const number_pointer store, double x)
+{
+  store.as642->val1 *= x;
+  store.as642->val2 *= x;
+}
+
+void worker_multi_real642::add(const number_pointer store, const number_pointer_c other)
+{
+  store.as642->val1 += other.as642->val1;
+  store.as642->val2 += other.as642->val2;
+}
+
+void worker_multi_real642::sub(const number_pointer store, const number_pointer_c other)
+{
+  store.as642->val1 -= other.as642->val1;
+  store.as642->val2 -= other.as642->val2;
+}
+
+void worker_multi_real642::rsub(const number_pointer store, const number_pointer_c other)
+{
+  store.as642->val1 = other.as642->val1-store.as642->val1;
+  store.as642->val2 = other.as642->val2-store.as642->val2;
+}
+
+void worker_multi_real642::mul(const number_pointer store, const number_pointer_c other)
+{
+  store.as642->val1 *= other.as642->val1;
+  store.as642->val2 *= other.as642->val2;
+}
+
+void worker_multi_real642::sqr(const number_pointer store)
+{
+  store.as642->val1 *= store.as642->val1;
+  store.as642->val2 *= store.as642->val2;
+}
+
+double worker_multi_real642::radixfloor(const number_pointer_c store1, const number_pointer_c store2)
+{
+  int ilog1=std::ilogb(store1.as642->val1);
+  int ilog2=std::ilogb(store2.as642->val1);
+  if (ilog1<ilog2)
+    ilog1=ilog2;
+  return ldexp(1, ilog1);
+}
+
+void worker_multi_real642::recip(const number_pointer store)
+{
+  store.as642->val1 = 1/store.as642->val1;
+  store.as642->val2 = 1/store.as642->val2;
+}
+
+void worker_multi_real642::sqrt(const number_pointer store)
+{
+  store.as642->val1 = std::sqrt(store.as642->val1);
+  double x=1/std::sqrt((double)store.as642->val2);
+  double ax=x*(double)store.as642->val2;
+  store.as642->val2 = ax + double(store.as642->val2 - __float128(ax)*__float128(ax))*x/2;
+}
+
+int worker_multi_real642::compare(const number_pointer_c store, const number_pointer_c other)
+{
+  if (store.as642->val1 == other.as642->val1)
+    return 0;
+  else if (store.as642->val1 < other.as642->val1)
+    return -1;
+  else
+    return +1;
+}
+
+bool worker_multi_real642::isequal(const number_pointer_c store, const number_pointer_c other)
+{
+  return store.as642->val1 == other.as642->val1;
+}
+
+bool worker_multi_real642::is0(const number_pointer_c store)
+{
+  return store.as642->val1 == 0;
+}
+
+bool worker_multi_real642::isle(const number_pointer_c store, const number_pointer_c other)
+{
+  return store.as642->val1 <= other.as642->val1;
+}
+
+bool worker_multi_real642::isle0(const number_pointer_c store)
+{
+  return store.as642->val1 <= 0;
+}
+
+bool worker_multi_real642::isl0(const number_pointer_c store)
+{
+  return store.as642->val1 < 0;
+}
+
+bool worker_multi_real642::isl1(const number_pointer_c store)
+{
+  return store.as642->val1 < 1;
+}
+
+QString worker_multi_real642::toString(const number_pointer_c store)
+{
+  return QString::number(store.as642->val1, 'f', 16);
+}
+
+int worker_multi_real642::toRound(const number_pointer_c store)
+{
+  return qRound(store.as642->val1);
+}
+
+double worker_multi_real642::toDouble(const number_pointer_c store)
+{
+  return store.as642->val1;
+}
+
 #endif
 
 
@@ -1648,6 +2010,11 @@ void number::sqrt()
 void number::add_double(double x)
 {
   worker->add_double(ptr, x);
+}
+
+double number::toDouble() const
+{
+  return worker->toDouble(ptr);
 }
 
 
@@ -1892,6 +2259,16 @@ bool complex::isequal(const complex *other) const
 {
   return worker->isequal(re, other->re) &&
          worker->isequal(im, other->im);
+}
+
+bool complex::is0() const
+{
+  return worker->is0(re) && worker->is0(im);
+}
+
+QString complex::toString()
+{
+  return worker->toString(re)+" +i* "+worker->toString(im);
 }
 
 double sqr_double(double x)

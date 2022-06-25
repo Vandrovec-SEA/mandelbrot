@@ -33,7 +33,6 @@ public:
   Q_INVOKABLE QString getTextXY();
   Q_INVOKABLE QString getTextInfoGen();
   Q_INVOKABLE QString getTextInfoSpec();
-  MandelMath::worker_multi::Allocator *paramsAllocator;
   struct Params
   {
     static constexpr int LEN=4;
@@ -42,7 +41,7 @@ public:
     MandelMath::complex root;
     Params(MandelMath::worker_multi::Allocator *allocator);
     void assign(Params *src);
-  } *params_;
+  };
 
 
   enum paintStyle
@@ -58,7 +57,7 @@ public:
   Q_PROPERTY(int threadsWorking READ getThreadsWorking CONSTANT)
   int getThreadsWorking() { return _threadsWorking; }
   Q_PROPERTY(int threadsMax READ getThreadCount CONSTANT)
-  int getThreadCount() { return threadCount; }
+  int getThreadCount() { return precisionRecord->threadCount; }
 
   enum precision
   {
@@ -66,7 +65,8 @@ public:
 #if !ONLY_DOUBLE_WORKER
     precisionFloat128=1,
     precisionDDouble=2,
-    precisionQDouble=3
+    precisionQDouble=3,
+    precisionReal642=4
 #endif
   };
   Q_ENUM(precision);
@@ -84,7 +84,6 @@ signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
 protected:
-  MandelMath::worker_multi *currentWorker; //for Position and Orbit
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore
   LaguerrePointStore *pointStore_;
@@ -97,11 +96,8 @@ protected:
   int lastGivenPointIndex_;
   int effortBonus;
   //constexpr static int MAX_EFFORT=17;//18;
-  int threadCount;
-  MandelEvaluator **threads;
   QElapsedTimer timerWriteToImage;
 
-  LaguerrePoint *wtiPoint;
   struct Position
   {
     static constexpr int LEN=2;
@@ -111,7 +107,7 @@ protected:
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    Position(MandelMath::worker_multi::Allocator *allocator);
+    Position(MandelMath::worker_multi::Allocator *allocator, Position *src);
     ~Position();
     void assign(Position *src);
     //void setNumberType(MandelMath::worker_multi::Type ntype);
@@ -121,7 +117,7 @@ protected:
     void updateCachedDepth();
     void pixelXtoRE(int x, MandelMath::number_pointer result);
     void pixelYtoIM(int y, MandelMath::number_pointer result);
-  } *position_;
+  };
   struct Orbit
   {
     MandelMath::worker_multi *currentWorker;
@@ -134,8 +130,21 @@ protected:
     Orbit(MandelMath::worker_multi::Allocator *allocator);
     ~Orbit();
     constexpr static int LEN=0*MandelEvaluator::LEN+LaguerrePoint::LEN;
-  } *orbit_;
+  };
   constexpr static int LEN=Params::LEN+LaguerrePoint::LEN+Position::LEN+Orbit::LEN  +4;
+  struct PrecisionRecord
+  {
+    MandelMath::worker_multi *currentWorker; //for Position and Orbit
+    MandelMath::worker_multi::Allocator paramsAllocator;
+    Params params;
+    LaguerrePoint wtiPoint;
+    Position position;
+    Orbit orbit;
+    int threadCount;
+    MandelEvaluator **threads;
+    PrecisionRecord(MandelMath::worker_multi *newWorker, PrecisionRecord *source, LaguerreModel *doneReceiver);
+    ~PrecisionRecord();
+  } *precisionRecord;
 signals:
   void doneWork(MandelEvaluator *evaluator);
 protected slots:

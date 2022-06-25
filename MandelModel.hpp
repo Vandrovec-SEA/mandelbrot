@@ -32,8 +32,6 @@ public:
   Q_INVOKABLE QString getTextXY();
   Q_INVOKABLE QString getTextInfoGen();
   Q_INVOKABLE QString getTextInfoSpec();
-  MandelMath::worker_multi::Allocator *shareableViewInfoAllocator;
-  MandelMath::worker_multi::Allocator *shareableVIAuser;
   ShareableViewInfo getViewInfo();
   Q_PROPERTY(ShareableViewInfo viewInfo READ getViewInfo CONSTANT)// WRITE setViewInfo NOTIFY viewInfoChanged)
 
@@ -56,7 +54,7 @@ public:
   Q_PROPERTY(int threadsWorking READ getThreadsWorking CONSTANT)
   int getThreadsWorking() { return _threadsWorking; }
   Q_PROPERTY(int threadsMax READ getThreadCount CONSTANT)
-  int getThreadCount() { return threadCount; }
+  int getThreadCount() { return precisionRecord->threadCount; }
 
   enum precision
   {
@@ -64,7 +62,8 @@ public:
 #if !ONLY_DOUBLE_WORKER
     precisionFloat128=1,
     precisionDDouble=2,
-    precisionQDouble=3
+    precisionQDouble=3,
+    precisionReal642=4
 #endif
   };
   Q_ENUM(precision);
@@ -84,10 +83,10 @@ signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
 protected:
-  MandelMath::worker_multi *currentWorker; //for Position and Orbit
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore
   MandelPointStore *pointStore_;
+
   //constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
@@ -98,11 +97,8 @@ protected:
   int effortBonus_;
   //constexpr static int MAX_EFFORT=17;//131072 iters;
   static constexpr int MAX_EFFORT=22;//
-  int threadCount;
-  MandelEvaluator **threads;
   QElapsedTimer timerWriteToImage;
 
-  MandelPoint *wtiPoint;
   struct Position
   {
     static constexpr int LEN=2;
@@ -113,7 +109,7 @@ protected:
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
     //Position(MandelMath::worker_multi::Allocator *allocator);
-    Position(MandelMath::worker_multi::Allocator *allocator, Position *src);
+    Position(MandelMath::worker_multi::Allocator *allocator, const Position *source);
     ~Position();
     //void assign(Position *src);
     //void setNumberType(MandelMath::worker_multi::Type ntype);
@@ -123,7 +119,7 @@ protected:
     void updateCachedDepth();
     void pixelXtoRE(int x, MandelMath::number_pointer result);
     void pixelYtoIM(int y, MandelMath::number_pointer result);
-  } *position_;
+  };
   struct Orbit
   {
     MandelMath::worker_multi *currentWorker;
@@ -149,11 +145,25 @@ protected:
       ~Bulb();
       constexpr static int LEN=10;
     } bulb;
-    Orbit(MandelMath::worker_multi::Allocator *allocator);
+    Orbit(MandelMath::worker_multi::Allocator *allocator, const Orbit *source);
     ~Orbit();
     constexpr static int LEN=0*MandelEvaluator::LEN+5+Bulb::LEN;
-  } *orbit_;
-  constexpr static int LEN=ShareableViewInfo::LEN+MandelPoint::LEN+Position::LEN+Orbit::LEN  +4;
+  };
+  struct PrecisionRecord
+  {
+    std::unique_ptr<MandelMath::worker_multi> currentWorker;
+    MandelMath::worker_multi::Allocator shareableViewInfoAllocator;
+    MandelMath::worker_multi::Allocator shareableVIAuser;
+    MandelPoint wtiPoint;
+    Position position;
+    Orbit orbit;
+    int threadCount;
+    MandelEvaluator **threads;
+    PrecisionRecord(MandelMath::worker_multi *newWorker, PrecisionRecord *source, MandelModel *doneReceiver);
+    ~PrecisionRecord();
+  } *precisionRecord;
+  constexpr static int LEN=ShareableViewInfo::LEN+MandelPoint::LEN+Position::LEN+Orbit::LEN  +6;
+    //setViewDouble=2 setView=2 updateCachedDepth=2 -> +6
 };
 
 

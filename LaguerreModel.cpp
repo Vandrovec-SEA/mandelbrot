@@ -7,10 +7,8 @@
 #include "MandelEvaluator.hpp"
 
 LaguerreModel::LaguerreModel(): QObject(),
-  paramsAllocator(nullptr), params_(nullptr), currentWorker(nullptr),
   storeAllocator(nullptr), storeWorker(nullptr), pointStore_(nullptr),
-  wtiPoint(nullptr),
-  position_(nullptr), orbit_(nullptr)
+  precisionRecord(nullptr)
 {
   unsigned int oldcw; //524319 = 0x8001F = mask all interrupts, 80bit precision
   MandelMath::fpu_fix_start(&oldcw);
@@ -25,8 +23,6 @@ LaguerreModel::LaguerreModel(): QObject(),
   //threadCount=4;
   //threadCount=1;//so fast that sending messages is slower QThread::idealThreadCount()-1;
   _threadsWorking=0;
-  threadCount=0;
-  threads=nullptr;
   QObject::connect(this, &LaguerreModel::selectedPrecisionChange,
                    this, &LaguerreModel::selectedPrecisionChanged);
   QObject::connect(this, &LaguerreModel::doneWork,
@@ -37,37 +33,10 @@ LaguerreModel::LaguerreModel(): QObject(),
 
 LaguerreModel::~LaguerreModel()
 {
-  for (int t=threadCount-1; t>=0; t--)
-  {
-    threads[t]->wantStop=true;
-    threads[t]->quit();
-  }
-  for (int t=threadCount-1; t>=0; t--)
-  {
-    threads[t]->wait(1000);
-    delete threads[t];
-  }
-  delete[] threads;
-  threadCount=0;
-  threads=nullptr;
-  if (orbit_!=nullptr)
-  {
-    orbit_->evaluator.wantStop=true;
-    orbit_->evaluator.quit();
-    orbit_->evaluator.wait(1000);
-    delete orbit_;
-  }
-
-  delete position_;
-  delete wtiPoint;
-  delete params_;
-  delete paramsAllocator;
-
+  delete precisionRecord;
   delete storeAllocator;
   delete storeWorker;
-  delete currentWorker;
   storeWorker=nullptr;
-  currentWorker=nullptr;
   /*for (int i=imageWidth*imageHeight-1; i>=0; i--)
   {
     pointStore[i].cleanup(position.worker);
@@ -81,20 +50,20 @@ LaguerreModel::~LaguerreModel()
 
 QString LaguerreModel::pixelXtoRE_str(int x)
 {
-  MandelMath::number num(currentWorker);
-  num.assign(position_->center.re);
-  num.add_double((x - imageWidth/2)*position_->step_size__);
-  QString result=currentWorker->toString(num.ptr);
+  MandelMath::number num(precisionRecord->currentWorker);
+  num.assign(precisionRecord->position.center.re);
+  num.add_double((x - imageWidth/2)*precisionRecord->position.step_size__);
+  QString result=precisionRecord->currentWorker->toString(num.ptr);
   return result;
 }
 
 QString LaguerreModel::pixelYtoIM_str(int y)
 {
 //  return (y - imageHeight/2)*position.step_size+position.center_im;
-  MandelMath::number num(currentWorker);
-  num.assign(position_->center.im);
-  num.add_double((y - imageHeight/2)*position_->step_size__);
-  QString result=currentWorker->toString(num.ptr);
+  MandelMath::number num(precisionRecord->currentWorker);
+  num.assign(precisionRecord->position.center.im);
+  num.add_double((y - imageHeight/2)*precisionRecord->position.step_size__);
+  QString result=precisionRecord->currentWorker->toString(num.ptr);
   return result;
 }
 
@@ -113,10 +82,10 @@ QString LaguerreModel::getTimes()
 
 QString LaguerreModel::getTextXY()
 {
-  if (currentWorker==nullptr || orbit_==nullptr)
+  if (precisionRecord==nullptr || precisionRecord->currentWorker==nullptr)
     return "-";
-  return currentWorker->toString(orbit_->evaluator.currentParams.c.re)+" +i* "+
-         currentWorker->toString(orbit_->evaluator.currentParams.c.im);
+  return precisionRecord->currentWorker->toString(precisionRecord->orbit.evaluator.currentParams.c.re)+" +i* "+
+         precisionRecord->currentWorker->toString(precisionRecord->orbit.evaluator.currentParams.c.im);
 }
 
 QString doubleToString(double x)
@@ -129,28 +98,28 @@ QString doubleToString(double x)
 
 QString LaguerreModel::getTextInfoGen()
 {
-  if (currentWorker==nullptr || orbit_==nullptr)
+  if (precisionRecord==nullptr || precisionRecord->currentWorker==nullptr)
     return "-";
   int orbit_x, orbit_y;
   {
-    MandelMath::number tmp(currentWorker);
-    tmp.assign(orbit_->evaluator.currentParams.c.re);
-    tmp.sub(position_->center.re);
-    orbit_x=qRound(currentWorker->toDouble(tmp.ptr)/position_->step_size__)+imageWidth/2;
+    MandelMath::number tmp(precisionRecord->currentWorker);
+    tmp.assign(precisionRecord->orbit.evaluator.currentParams.c.re);
+    tmp.sub(precisionRecord->position.center.re);
+    orbit_x=qRound(tmp.toDouble()/precisionRecord->position.step_size__)+imageWidth/2;
 
-    tmp.assign(orbit_->evaluator.currentParams.c.im);
-    tmp.sub(position_->center.im);
-    orbit_y=imageHeight/2-qRound(currentWorker->toDouble(tmp.ptr)/position_->step_size__);
+    tmp.assign(precisionRecord->orbit.evaluator.currentParams.c.im);
+    tmp.sub(precisionRecord->position.center.im);
+    orbit_y=imageHeight/2-qRound(tmp.toDouble()/precisionRecord->position.step_size__);
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
   //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
   //LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
-  wtiPoint->store=&pointStore_[orbit_x+imageWidth*orbit_y];
+  precisionRecord->wtiPoint.store=&pointStore_[orbit_x+imageWidth*orbit_y];
   int wtiIndexFirst, wtiIndexLast;
-  wtiPoint->self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
-  currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN);
-  LaguerrePoint *data=wtiPoint;
+  precisionRecord->wtiPoint.self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
+  precisionRecord->currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+  LaguerrePoint *data=&precisionRecord->wtiPoint;
 
   QString state;
   switch (data->store->state)
@@ -163,29 +132,29 @@ QString LaguerreModel::getTextInfoGen()
       state="Err"; break;
   }
 
-  return "Per="+QString::number(params_->period)+" "+state+" iter="+QString::number(data->store->iter)+
-        " mu="+QString::number(orbit_->first_mu_re_, 'f', 3)+","+QString::number(orbit_->first_mu_im, 'f', 3)+
-        " mum="+QString::number(orbit_->first_mum_re_, 'f', 3)+","+QString::number(orbit_->first_mum_im_, 'f', 3);
+  return "Per="+QString::number(precisionRecord->params.period)+" "+state+" iter="+QString::number(data->store->iter)+
+        " mu="+QString::number(precisionRecord->orbit.first_mu_re_, 'f', 3)+","+QString::number(precisionRecord->orbit.first_mu_im, 'f', 3)+
+        " mum="+QString::number(precisionRecord->orbit.first_mum_re_, 'f', 3)+","+QString::number(precisionRecord->orbit.first_mum_im_, 'f', 3);
 }
 
 QString LaguerreModel::getTextInfoSpec()
 {
-  if (currentWorker==nullptr)
+  if (precisionRecord==nullptr || precisionRecord->currentWorker==nullptr)
     return "-";
   int orbit_x, orbit_y;
   {
-    MandelMath::number tmp(currentWorker);
-    reimToPixel(&orbit_x, &orbit_y, &orbit_->evaluator.currentParams.c, &tmp);
+    MandelMath::number tmp(precisionRecord->currentWorker);
+    reimToPixel(&orbit_x, &orbit_y, &precisionRecord->orbit.evaluator.currentParams.c, &tmp);
   }
   if ((orbit_x<0) || (orbit_x>=imageWidth) || (orbit_y<0) | (orbit_y>=imageHeight))
     return "? +i* ?";
   //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
   //LaguerrePoint data_(&pointStore_[orbit_x+imageWidth*orbit_y], &allo);
-  wtiPoint->store=&pointStore_[orbit_x+imageWidth*orbit_y];
+  precisionRecord->wtiPoint.store=&pointStore_[orbit_x+imageWidth*orbit_y];
   int wtiIndexFirst, wtiIndexLast;
-  wtiPoint->self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
-  currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN);
-  LaguerrePoint *data=wtiPoint;
+  precisionRecord->wtiPoint.self_allocator._getRange(wtiIndexFirst, wtiIndexLast);
+  precisionRecord->currentWorker->assign_block(wtiIndexFirst, storeWorker, (orbit_x+imageWidth*orbit_y)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+  LaguerrePoint *data=&precisionRecord->wtiPoint;
 
   switch (data->store->state)
   {
@@ -196,7 +165,7 @@ QString LaguerreModel::getTextInfoSpec()
     {
       //MandelMath::complex fz(orbit.worker, &orbit.pointData.fz_r_re, &orbit.pointData.fz_r_im, true);
       QString naiveChoice;
-      switch (orbit_->pointData.store->naiveChoice)
+      switch (precisionRecord->orbit.pointData.store->naiveChoice)
       {
         case NewtonNaiveChoice::nc03: naiveChoice="0.3"; break;
         case NewtonNaiveChoice::nc05: naiveChoice="0.5"; break;
@@ -208,8 +177,8 @@ QString LaguerreModel::getTextInfoSpec()
         case NewtonNaiveChoice::nc60: naiveChoice="60"; break;
         case NewtonNaiveChoice::ncClose: naiveChoice="Close"; break;
       }
-      return QString("attr=")+QString::number(orbit_->pointData.fz_r.getMag_double())+
-             QString(" firstM=")+QString::number(orbit_->pointData.store->firstM)+
+      return QString("attr=")+QString::number(precisionRecord->orbit.pointData.fz_r.getMag_double())+
+             QString(" firstM=")+QString::number(precisionRecord->orbit.pointData.store->firstM)+
              QString(" NChoice=")+naiveChoice;
     } break;
     case LaguerrePointStore::State::stFail:
@@ -221,57 +190,38 @@ QString LaguerreModel::getTextInfoSpec()
 void LaguerreModel::setParams(ShareableViewInfo viewInfo)
 {
   //position.setNumberType(viewInfo.worker->ntype());
-  params_->period=viewInfo.period;
-  if (position_==nullptr || params_==nullptr || orbit_==nullptr)
+  if (precisionRecord==nullptr || precisionRecord->currentWorker==nullptr)
     dbgPoint();
+  precisionRecord->params.period=viewInfo.period;
 
-  switch (currentWorker->ntype())
+  if (viewInfo.originalAllocator->worker->ntype()==precisionRecord->currentWorker->ntype())
   {
-    case MandelMath::worker_multi::Type::typeEmpty:
-      dbgPoint();
-      goto lolwut;
-    case MandelMath::worker_multi::Type::typeDouble: lolwut:
-    {
-      //watch this
-      MandelMath::worker_multi_double tmpworker(viewInfo.originalAllocator);
-      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
-      params_->base.assign(&tmpinfo.c);
-      params_->root.assign(&tmpinfo.root);
-    } break;
-    case MandelMath::worker_multi::Type::typeFloat128:
-    {
-      //watch this
-      MandelMath::worker_multi_float128 tmpworker(viewInfo.originalAllocator);
-      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
-      params_->base.assign(&tmpinfo.c);
-      params_->root.assign(&tmpinfo.root);
-    } break;
-    case MandelMath::worker_multi::Type::typeDDouble:
-    {
-      //watch this
-      MandelMath::worker_multi_ddouble tmpworker(viewInfo.originalAllocator);
-      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
-      params_->base.assign(&tmpinfo.c);
-      params_->root.assign(&tmpinfo.root);
-    } break;
-    case MandelMath::worker_multi::Type::typeQDouble:
-    {
-      //watch this
-      MandelMath::worker_multi_qdouble tmpworker(viewInfo.originalAllocator);
-      ShareableViewInfo tmpinfo(tmpworker.getAllocator());
-      params_->base.assign(&tmpinfo.c);
-      params_->root.assign(&tmpinfo.root);
-    } break;
+    precisionRecord->params.base.assign(&viewInfo.c);
+    precisionRecord->params.root.assign(&viewInfo.root);
   }
-  MandelMath::complex old_c(currentWorker);
-  old_c.assign(&position_->center);
-  int old_step_log=position_->step_log;
+  else
+  {
+    //watch this
+    dbgPoint(); //probably happens quite rarely, let's debug it when it does
+    MandelMath::worker_multi::Type ntype=precisionRecord->currentWorker->ntype();
+    MandelMath::worker_multi *tmpworker=MandelMath::worker_multi::create(ntype, viewInfo.originalAllocator);
+    {
+      MandelMath::worker_multi::Allocator useTmp(tmpworker->getAllocator(), ShareableViewInfo::LEN);
+      ShareableViewInfo tmpinfo(&useTmp);
+      precisionRecord->params.base.assign(&tmpinfo.c);
+      precisionRecord->params.root.assign(&tmpinfo.root);
+    }
+    delete tmpworker;
+  }
+  MandelMath::complex old_c(precisionRecord->currentWorker);
+  old_c.assign(&precisionRecord->position.center);
+  int old_step_log=precisionRecord->position.step_log;
 
-  position_->setView(&params_->base, viewInfo.scale);
+  precisionRecord->position.setView(&precisionRecord->params.base, viewInfo.scale);
 
-  transformStore(currentWorker, storeWorker, pointStore_, 0, 0, &old_c,
-                 currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
-                 position_->step_log-old_step_log, position_->step_log);
+  transformStore(precisionRecord->currentWorker, storeWorker, pointStore_, 0, 0, &old_c,
+                 precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &precisionRecord->position.center,
+                 precisionRecord->position.step_log-old_step_log, precisionRecord->position.step_log);
 
   startNewEpoch();
 }
@@ -280,13 +230,13 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
                                    MandelMath::worker_multi *new_worker, MandelMath::worker_multi *new_sworker, LaguerrePointStore *new_store, int new_width, int new_height, const MandelMath::complex *new_c,
                                    int inlog, int new_step_log)
 {
-  if (currentWorker==nullptr)
+  if (precisionRecord==nullptr || precisionRecord->currentWorker==nullptr)
   {
     dbgPoint();
     return;
   };
   int indexOfWtiPoint, wtiIndexLast;
-  wtiPoint->self_allocator._getRange(indexOfWtiPoint, wtiIndexLast);
+  precisionRecord->wtiPoint.self_allocator._getRange(indexOfWtiPoint, wtiIndexLast);
   assert(wtiIndexLast-indexOfWtiPoint==LaguerrePoint::LEN);
   //(oldx-width/2)*old_step+old_cre = (newx-width/2)*new_step+new_cre
   //oldx = (width/2) + (newx-width/2+(new_cre-old_cre)/new_step)*new_step/old_step
@@ -337,8 +287,8 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
       oldy=(old_height/2) + (((newy<<step_scale_n_shift)+delta_y_int)>>step_scale_d_shift);
     else
       oldy=-1;//call reset() in the second loop, we may still need the points  =imageHeight;
-    new_worker->assign(c.im, position_->center.im);
-    new_worker->add_double(c.im, (new_height/2-newy)*position_->step_size__);
+    new_worker->assign(c.im, precisionRecord->position.center.im);
+    new_worker->add_double(c.im, (new_height/2-newy)*precisionRecord->position.step_size__);
     for (int newx=0; newx<new_width; newx++)
     {
       int oldx;
@@ -355,14 +305,14 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
         }
         else
         {
-          new_worker->assign(c.re, position_->center.re);
-          new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
+          new_worker->assign(c.re, precisionRecord->position.center.re);
+          new_worker->add_double(c.re, (newx - new_width/2)*precisionRecord->position.step_size__);
           //MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
           //LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
           //pt.zero(&c);
-          wtiPoint->store=&new_store[newy*new_width+newx];
-          wtiPoint->zero(&c);
-          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, currentWorker, indexOfWtiPoint, LaguerrePoint::LEN);
+          precisionRecord->wtiPoint.store=&new_store[newy*new_width+newx];
+          precisionRecord->wtiPoint.zero(&c);
+          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, precisionRecord->currentWorker, indexOfWtiPoint, LaguerrePoint::LEN);
         }
       };
     }
@@ -374,8 +324,8 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
       oldy=(old_height/2) + (((newy<<step_scale_n_shift)+delta_y_int)>>step_scale_d_shift);
     else
       oldy=-1;
-    new_worker->assign(c.im, position_->center.im);
-    new_worker->add_double(c.im, (new_height/2-newy)*position_->step_size__);
+    new_worker->assign(c.im, precisionRecord->position.center.im);
+    new_worker->add_double(c.im, (new_height/2-newy)*precisionRecord->position.step_size__);
     for (int newx=new_width-1; newx>=0; newx--)
     {
       int oldx;
@@ -392,14 +342,14 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
         }
         else
         {
-          new_worker->assign(c.re, position_->center.re);
-          new_worker->add_double(c.re, (newx - new_width/2)*position_->step_size__);
+          new_worker->assign(c.re, precisionRecord->position.center.re);
+          new_worker->add_double(c.re, (newx - new_width/2)*precisionRecord->position.step_size__);
           //MandelMath::worker_multi::Allocator allo(new_sworker->getAllocator(), (newy*new_width+newx)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
           //LaguerrePoint pt(&new_store[newy*new_width+newx], &allo);
           //pt.zero(&c);
-          wtiPoint->store=&new_store[newy*new_width+newx];
-          wtiPoint->zero(&c);
-          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, currentWorker, indexOfWtiPoint, LaguerrePoint::LEN);
+          precisionRecord->wtiPoint.store=&new_store[newy*new_width+newx];
+          precisionRecord->wtiPoint.zero(&c);
+          new_sworker->assign_block((newy*new_width+newx)*LaguerrePoint::LEN, precisionRecord->currentWorker, indexOfWtiPoint, LaguerrePoint::LEN);
         }
       }
     }
@@ -408,15 +358,15 @@ void LaguerreModel::transformStore(MandelMath::worker_multi *old_worker, MandelM
 
 void LaguerreModel::setView_(const MandelMath::complex *c, double scale)
 {
-  MandelMath::complex old_c(currentWorker);
-  old_c.assign(&position_->center);
-  int old_step_log=position_->step_log;
+  MandelMath::complex old_c(precisionRecord->currentWorker);
+  old_c.assign(&precisionRecord->position.center);
+  int old_step_log=precisionRecord->position.step_log;
 
-  position_->setView(c, scale);
+  precisionRecord->position.setView(c, scale);
 
-  transformStore(currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
-                 currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
-                 position_->step_log-old_step_log, position_->step_log);
+  transformStore(precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &precisionRecord->position.center,
+                 precisionRecord->position.step_log-old_step_log, precisionRecord->position.step_log);
 
   startNewEpoch();
 }
@@ -424,32 +374,32 @@ void LaguerreModel::setView_(const MandelMath::complex *c, double scale)
 void LaguerreModel::drag(double delta_x, double delta_y)
 {
   //qDebug()<<"drag ("<<delta_x<<","<<delta_y<<")";
-  MandelMath::complex old_c(currentWorker);
-  old_c.assign(&position_->center);
+  MandelMath::complex old_c(precisionRecord->currentWorker);
+  old_c.assign(&precisionRecord->position.center);
 
   int dx=qRound(delta_x);
   int dy=qRound(delta_y);
-  position_->move(dx, dy);
+  precisionRecord->position.move(dx, dy);
   //qDebug()<<"new c: re="<<position.worker->toString(&position.center_re_s)<<",im="<<position.worker->toString(&position.center_im_s);
 
-  transformStore(currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
-                 currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
-                 0, position_->step_log);
+  transformStore(precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &precisionRecord->position.center,
+                 0, precisionRecord->position.step_log);
 
   startNewEpoch();
 }
 
 void LaguerreModel::zoom(double x, double y, int inlog)
 {
-  MandelMath::complex old_c(currentWorker);
-  old_c.assign(&position_->center);
-  int old_step_log=position_->step_log;
+  MandelMath::complex old_c(precisionRecord->currentWorker);
+  old_c.assign(&precisionRecord->position.center);
+  int old_step_log=precisionRecord->position.step_log;
 
-  position_->scale(inlog, qRound(x)-imageWidth/2, imageHeight/2-qRound(y));
+  precisionRecord->position.scale(inlog, qRound(x)-imageWidth/2, imageHeight/2-qRound(y));
 
-  transformStore(currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
-                 currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &position_->center,
-                 position_->step_log-old_step_log, position_->step_log);
+  transformStore(precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &precisionRecord->position.center,
+                 precisionRecord->position.step_log-old_step_log, precisionRecord->position.step_log);
 
   startNewEpoch();
 }
@@ -469,36 +419,17 @@ void LaguerreModel::setImageSize(int width, int height)
     qDebug()<<"laguerreStore uses"<<size_as_text.toLocal8Bit().constData()<<"B";
   }
   MandelMath::worker_multi *newStoreWorker;
+  newStoreWorker=MandelMath::worker_multi::create(storeWorker->ntype(), newLength*LaguerrePoint::LEN);
   MandelMath::worker_multi::Allocator *newStoreAllocator;
-  switch (storeWorker->ntype())
-  {
-    default://case MandelMath::worker_multi::Type::typeEmpty:
-      dbgPoint();
-      goto lolwut;
-    case MandelMath::worker_multi::Type::typeDouble: lolwut:
-      newStoreWorker=new MandelMath::worker_multi_double(newLength*LaguerrePoint::LEN);
-      break;
-#if !ONLY_DOUBLE_WORKER
-    case MandelMath::worker_multi::Type::typeFloat128:
-      newStoreWorker=new MandelMath::worker_multi_float128(newLength*LaguerrePoint::LEN);
-      break;
-    case MandelMath::worker_multi::Type::typeDDouble:
-      newStoreWorker=new MandelMath::worker_multi_ddouble(newLength*LaguerrePoint::LEN);
-      break;
-    case MandelMath::worker_multi::Type::typeQDouble:
-      newStoreWorker=new MandelMath::worker_multi_qdouble(newLength*LaguerrePoint::LEN);
-      break;
-#endif
-  }
   newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), newLength*LaguerrePoint::LEN);
 
 
-  MandelMath::complex old_c(currentWorker);
-  old_c.assign(&position_->center);
+  MandelMath::complex old_c(precisionRecord->currentWorker);
+  old_c.assign(&precisionRecord->position.center);
 
-  transformStore(currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
-                 currentWorker, newStoreWorker, newStore_, width, height, &position_->center,
-                 0, position_->step_log);
+  transformStore(precisionRecord->currentWorker, storeWorker, pointStore_, imageWidth, imageHeight, &old_c,
+                 precisionRecord->currentWorker, newStoreWorker, newStore_, width, height, &precisionRecord->position.center,
+                 0, precisionRecord->position.step_log);
 
   delete storeAllocator;
   delete storeWorker;
@@ -517,34 +448,47 @@ void LaguerreModel::startNewEpoch()
   epoch=(epoch+1)%2000000000;
   lastGivenPointIndex_=0;
   effortBonus=0;
-  for (int t=0; t<threadCount; t++)
-    if (threads[t]->currentParams.pixelIndex<0)
-      giveWork(threads[t]);
+  giveWorkAll();
 }
 
 void LaguerreModel::giveWorkAll()
 {
-  for (int t=0; t<threadCount; t++)
-    if (threads[t]->currentParams.pixelIndex<0)
-      giveWork(threads[t]);
+  for (int t=0; t<precisionRecord->threadCount; t++)
+    if (precisionRecord->threads[t]->currentParams.pixelIndex<0)
+      giveWork(precisionRecord->threads[t]);
 }
 
 void LaguerreModel::reimToPixel(int *circ_x, int *circ_y, const MandelMath::complex *c, MandelMath::number *tmp)
 {
+  double scaled;
   tmp->assign(c->re);
-  tmp->sub(position_->center.re);
-  *circ_x=qRound(currentWorker->toDouble(tmp->ptr)/position_->step_size__)+imageWidth/2;
+  tmp->sub(precisionRecord->position.center.re);
+  scaled=tmp->toDouble()/precisionRecord->position.step_size__;
+  if (scaled<-10003 || scaled>10003)
+    *circ_x=-100;
+  else
+    *circ_x=qRound(scaled)+imageWidth/2;
 
   tmp->assign(c->im);
-  tmp->sub(position_->center.im);
-  *circ_y=imageHeight/2-qRound(currentWorker->toDouble(tmp->ptr)/position_->step_size__);
+  tmp->sub(precisionRecord->position.center.im);
+  scaled=tmp->toDouble()/precisionRecord->position.step_size__;
+  if (scaled<-10003 || scaled>10003)
+    *circ_y=-100;
+  else
+    *circ_y=imageHeight/2-qRound(scaled);
 }
 
 void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 {
   if ((x<0) || (x>=imageWidth) || (y<0) || (y>=imageHeight))
     return;
-  if (params_->period<=0)
+  if (precisionRecord==nullptr)
+    dbgPoint();
+  else if (precisionRecord->currentWorker==nullptr)
+    dbgPoint();
+  else if (precisionRecord->orbit.currentWorker->ntype()!=precisionRecord->currentWorker->ntype())
+    dbgPoint();
+  if (precisionRecord->params.period<=0)
     return;
 
   QImage newOverlay(imageWidth, imageHeight, QImage::Format::Format_ARGB32);
@@ -557,12 +501,6 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   };
 
   //LaguerrePoint *data=&pointStore[y*imageWidth+x];
-  if (orbit_==nullptr)
-    dbgPoint();
-  else if (currentWorker==nullptr)
-    dbgPoint();
-  else if (orbit_->currentWorker->ntype()!=currentWorker->ntype())
-    dbgPoint();
   /*switch (data_->state)
   {
     case LaguerrePoint::State::stUnknown:
@@ -571,12 +509,12 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
     default: ;
   }*/
   //orbit.evaluator.switchType(position.worker);
-  MandelMath::number tmp(currentWorker);//=&orbit.evaluator.currentData.f_re;
+  MandelMath::number tmp(precisionRecord->currentWorker);//=&orbit.evaluator.currentData.f_re;
   {
     int circ_x, circ_y;
     painter.setBrush(Qt::BrushStyle::NoBrush);
     painter.setPen(QColor(0xff, 0, 0)); //paint c
-    reimToPixel(&circ_x, &circ_y, &params_->base, &tmp);
+    reimToPixel(&circ_x, &circ_y, &precisionRecord->params.base, &tmp);
     if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
     {
       painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -588,7 +526,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
     painter.setBrush(Qt::BrushStyle::NoBrush);
     painter.setPen(QColor(0xff, 0, 0)); //paint root as +
-    reimToPixel(&circ_x, &circ_y, &params_->root, &tmp);
+    reimToPixel(&circ_x, &circ_y, &precisionRecord->params.root, &tmp);
     if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
     {
       painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -603,50 +541,50 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   //evaluator.data.root .. found root (temporary)
   //pointData.f .. not used
   //pointData.fz .. result f'
-  position_->pixelXtoRE(x-imageWidth/2, orbit_->evaluator.currentParams.c.re); //remember for text labels
-  position_->pixelYtoIM(imageHeight/2-y, orbit_->evaluator.currentParams.c.im);
-  orbit_->evaluator.currentParams.epoch=epoch;
-  orbit_->evaluator.currentParams.pixelIndex=0;
-  orbit_->pointData.zero(&orbit_->evaluator.currentParams.c);
+  precisionRecord->position.pixelXtoRE(x-imageWidth/2, precisionRecord->orbit.evaluator.currentParams.c.re); //remember for text labels
+  precisionRecord->position.pixelYtoIM(imageHeight/2-y, precisionRecord->orbit.evaluator.currentParams.c.im);
+  precisionRecord->orbit.evaluator.currentParams.epoch=epoch;
+  precisionRecord->orbit.evaluator.currentParams.pixelIndex=0;
+  precisionRecord->orbit.pointData.zero(&precisionRecord->orbit.evaluator.currentParams.c);
   /*MandelMath::complex base(orbit.worker, &params.base_re_s_, &params.base_im_s, true);
   currentWorker->assign(&orbit.evaluator.currentData.root_re, &orbit.evaluator.currentParams.c_re);
   orbit.worker->assign(&orbit.evaluator.currentData.root_im, &orbit.evaluator.currentParams.c_im);
   MandelMath::complex root(orbit.worker, &orbit.evaluator.currentData.root_re, &orbit.evaluator.currentData.root_im, true);*/
-  orbit_->evaluator.currentData.root.assign(&orbit_->evaluator.currentParams.c);
-  orbit_->evaluator.newton(params_->period, &params_->base, &orbit_->evaluator.currentData.root, true, 12);
+  precisionRecord->orbit.evaluator.currentData.root.assign(&precisionRecord->orbit.evaluator.currentParams.c);
+  precisionRecord->orbit.evaluator.newton(precisionRecord->params.period, &precisionRecord->params.base, &precisionRecord->orbit.evaluator.currentData.root, true, 12);
   //orbit.pointData.assign(orbit.worker, orbit.evaluator.currentData);
-  orbit_->pointData.store->iter=orbit_->evaluator.newtres_.cyclesNeeded;
-  orbit_->pointData.store->firstM=orbit_->evaluator.newtres_.firstMum_re_;
-  orbit_->pointData.fz_r.assign(&orbit_->evaluator.newtres_.fz_r);
-  currentWorker->add_double(orbit_->pointData.fz_r.re, 1);
-  orbit_->pointData.store->naiveChoice=orbit_->evaluator.newtres_.naiveChoice;
-  orbit_->first_mu_re_=orbit_->evaluator.newtres_.firstMu_re_;
-  orbit_->first_mu_im=orbit_->evaluator.newtres_.firstMu_im;
-  orbit_->first_mum_re_=orbit_->evaluator.newtres_.firstMum_re_;
-  orbit_->first_mum_im_=orbit_->evaluator.newtres_.firstMum_im_;
+  precisionRecord->orbit.pointData.store->iter=precisionRecord->orbit.evaluator.newtres_.cyclesNeeded;
+  precisionRecord->orbit.pointData.store->firstM=precisionRecord->orbit.evaluator.newtres_.firstMum_re_;
+  precisionRecord->orbit.pointData.fz_r.assign(&precisionRecord->orbit.evaluator.newtres_.fz_r);
+  precisionRecord->currentWorker->add_double(precisionRecord->orbit.pointData.fz_r.re, 1);
+  precisionRecord->orbit.pointData.store->naiveChoice=precisionRecord->orbit.evaluator.newtres_.naiveChoice;
+  precisionRecord->orbit.first_mu_re_=precisionRecord->orbit.evaluator.newtres_.firstMu_re_;
+  precisionRecord->orbit.first_mu_im=precisionRecord->orbit.evaluator.newtres_.firstMu_im;
+  precisionRecord->orbit.first_mum_re_=precisionRecord->orbit.evaluator.newtres_.firstMum_re_;
+  precisionRecord->orbit.first_mum_im_=precisionRecord->orbit.evaluator.newtres_.firstMum_im_;
 
   int circ_x, circ_y;
   double tmp_re, tmp_im;
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0xff, 0xff, 0)); //final=yellow /
-  reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.currentData.root, &tmp);
+  reimToPixel(&circ_x, &circ_y, &precisionRecord->orbit.evaluator.currentData.root, &tmp);
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawLine(circ_x-2, circ_y+2, circ_x+2, circ_y-2);
     //size of r that maps to 1 epsilon: about the width of transition from >0 to <0
-    int circ_r=ldexp(sqrt(orbit_->evaluator.newtres_.accy_tostop*currentWorker->eps2()), position_->step_log);
+    int circ_r=ldexp(sqrt(precisionRecord->orbit.evaluator.newtres_.accy_tostop*precisionRecord->currentWorker->eps2()), precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
       painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
     //size of r that maps to a few epsilon: the accuracy of root and also size of the dead pool
-    circ_r=ldexp(sqrt((orbit_->evaluator.newtres_.accy_tostop*orbit_->evaluator.newtres_.accy_multiplier)*currentWorker->eps2()), position_->step_log);
+    circ_r=ldexp(sqrt((precisionRecord->orbit.evaluator.newtres_.accy_tostop*precisionRecord->orbit.evaluator.newtres_.accy_multiplier)*precisionRecord->currentWorker->eps2()), precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
       painter.drawEllipse(circ_x-circ_r, circ_y-circ_r, 2*circ_r, 2*circ_r);
   };
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0xff, 0, 0xff)); //Newton=purple \      .
-  reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.newtres_.first_guess_newt, &tmp);
+  reimToPixel(&circ_x, &circ_y, &precisionRecord->orbit.evaluator.newtres_.first_guess_newt, &tmp);
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -655,11 +593,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush); //white = is better visible than cyan | so paint it under
   painter.setPen(QColor(0xff, 0xff, 0xff)); //Fejer=white =
-  tmp_re=orbit_->evaluator.newtres_.first_fejer_re-currentWorker->toDouble(position_->center.re);
-  tmp_re=ldexp(tmp_re, position_->step_log);
+  tmp_re=precisionRecord->orbit.evaluator.newtres_.first_fejer_re-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.re);
+  tmp_re=ldexp(tmp_re, precisionRecord->position.step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit_->evaluator.newtres_.first_fejer_im-currentWorker->toDouble(position_->center.im);
-  tmp_im=ldexp(tmp_im, position_->step_log);
+  tmp_im=precisionRecord->orbit.evaluator.newtres_.first_fejer_im-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.im);
+  tmp_im=ldexp(tmp_im, precisionRecord->position.step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -670,33 +608,33 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush); //
   painter.setPen(QColor(0xff, 0x00, 0x00)); //Naive=red o
-  tmp_re=orbit_->evaluator.newtres_.first_naive1_re_-currentWorker->toDouble(position_->center.re);
-  tmp_re=ldexp(tmp_re, position_->step_log);
+  tmp_re=precisionRecord->orbit.evaluator.newtres_.first_naive1_re_-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.re);
+  tmp_re=ldexp(tmp_re, precisionRecord->position.step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit_->evaluator.newtres_.first_naive1_im-currentWorker->toDouble(position_->center.im);
-  tmp_im=ldexp(tmp_im, position_->step_log);
+  tmp_im=precisionRecord->orbit.evaluator.newtres_.first_naive1_im-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.im);
+  tmp_im=ldexp(tmp_im, precisionRecord->position.step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawEllipse(circ_x-2, circ_y-2, 2*2, 2*2);
   };
-  tmp_re=orbit_->evaluator.newtres_.first_naive2_re-currentWorker->toDouble(position_->center.re);
-  tmp_re=ldexp(tmp_re, position_->step_log);
+  tmp_re=precisionRecord->orbit.evaluator.newtres_.first_naive2_re-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.re);
+  tmp_re=ldexp(tmp_re, precisionRecord->position.step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit_->evaluator.newtres_.first_naive2_im-currentWorker->toDouble(position_->center.im);
-  tmp_im=ldexp(tmp_im, position_->step_log);
+  tmp_im=precisionRecord->orbit.evaluator.newtres_.first_naive2_im-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.im);
+  tmp_im=ldexp(tmp_im, precisionRecord->position.step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
     painter.drawEllipse(circ_x-1, circ_y-1, 2*1, 2*1);
   };
-  tmp_re=orbit_->evaluator.newtres_.first_naive_re-currentWorker->toDouble(position_->center.re);
-  tmp_re=ldexp(tmp_re, position_->step_log);
+  tmp_re=precisionRecord->orbit.evaluator.newtres_.first_naive_re-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.re);
+  tmp_re=ldexp(tmp_re, precisionRecord->position.step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit_->evaluator.newtres_.first_naive_im-currentWorker->toDouble(position_->center.im);
-  tmp_im=ldexp(tmp_im, position_->step_log);
+  tmp_im=precisionRecord->orbit.evaluator.newtres_.first_naive_im-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.im);
+  tmp_im=ldexp(tmp_im, precisionRecord->position.step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -707,7 +645,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0x80, 0xff, 0xff)); //Laguerre=cyan |
-  reimToPixel(&circ_x, &circ_y, &orbit_->evaluator.newtres_.first_guess_lagu, &tmp);
+  reimToPixel(&circ_x, &circ_y, &precisionRecord->orbit.evaluator.newtres_.first_guess_lagu, &tmp);
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
     painter.drawEllipse(circ_x-3, circ_y-3, 2*3, 2*3);
@@ -716,11 +654,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0x80, 0xff, 0xff)); //Laguerre1=cyan ||
-  tmp_re=orbit_->evaluator.newtres_.first_lagu1_re-currentWorker->toDouble(position_->center.re);
-  tmp_re=ldexp(tmp_re, position_->step_log);
+  tmp_re=precisionRecord->orbit.evaluator.newtres_.first_lagu1_re-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.re);
+  tmp_re=ldexp(tmp_re, precisionRecord->position.step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit_->evaluator.newtres_.first_lagu1_im-currentWorker->toDouble(position_->center.im);
-  tmp_im=ldexp(tmp_im, position_->step_log);
+  tmp_im=precisionRecord->orbit.evaluator.newtres_.first_lagu1_im-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.im);
+  tmp_im=ldexp(tmp_im, precisionRecord->position.step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -731,11 +669,11 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
   painter.setPen(QColor(0x80, 0xff, 0xff)); //Laguerre1other=cyan o
-  tmp_re=orbit_->evaluator.newtres_.first_lagu1o_re-currentWorker->toDouble(position_->center.re);
-  tmp_re=ldexp(tmp_re, position_->step_log);
+  tmp_re=precisionRecord->orbit.evaluator.newtres_.first_lagu1o_re-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.re);
+  tmp_re=ldexp(tmp_re, precisionRecord->position.step_log);
   circ_x=tmp_re+imageWidth/2;
-  tmp_im=orbit_->evaluator.newtres_.first_lagu1o_im-currentWorker->toDouble(position_->center.im);
-  tmp_im=ldexp(tmp_im, position_->step_log);
+  tmp_im=precisionRecord->orbit.evaluator.newtres_.first_lagu1o_im-precisionRecord->currentWorker->toDouble(precisionRecord->position.center.im);
+  tmp_im=ldexp(tmp_im, precisionRecord->position.step_log);
   circ_y=imageHeight/2-tmp_im;
   if ((circ_x>=-3) && (circ_x<=10003) && (circ_y>=-3) && (circ_y<=10003))
   {
@@ -745,21 +683,21 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
 
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
-  if (orbit_->evaluator.newtres_.first_neumaier1_im_!=0)
+  if (precisionRecord->orbit.evaluator.newtres_.first_neumaier1_im_!=0)
   {
     painter.setPen(QColor(0xff, 0x00, 0x00)); //Neumaier1_im
-    int circ_r=ldexp(abs(orbit_->evaluator.newtres_.first_neumaier1_im_), position_->step_log);
+    int circ_r=ldexp(abs(precisionRecord->orbit.evaluator.newtres_.first_neumaier1_im_), precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
     };
   };
-  if ((orbit_->evaluator.newtres_.first_neumaier1_im_!=0) || (orbit_->evaluator.newtres_.first_neumaier1_re_<0))
+  if ((precisionRecord->orbit.evaluator.newtres_.first_neumaier1_im_!=0) || (precisionRecord->orbit.evaluator.newtres_.first_neumaier1_re_<0))
   {
     painter.setPen(QColor(0xff, 0x00, 0xff)); //Neumaier1_mag
-    double mag=sqrt(orbit_->evaluator.newtres_.first_neumaier1_re_*orbit_->evaluator.newtres_.first_neumaier1_re_+
-                    orbit_->evaluator.newtres_.first_neumaier1_im_*orbit_->evaluator.newtres_.first_neumaier1_im_);
-    int circ_r=ldexp(mag, position_->step_log);
+    double mag=sqrt(precisionRecord->orbit.evaluator.newtres_.first_neumaier1_re_*precisionRecord->orbit.evaluator.newtres_.first_neumaier1_re_+
+                    precisionRecord->orbit.evaluator.newtres_.first_neumaier1_im_*precisionRecord->orbit.evaluator.newtres_.first_neumaier1_im_);
+    int circ_r=ldexp(mag, precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -768,7 +706,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   else
   {
     painter.setPen(QColor(0xff, 0xff, 0xff)); //Neumaier1
-    int circ_r=ldexp(orbit_->evaluator.newtres_.first_neumaier1_re_, position_->step_log);
+    int circ_r=ldexp(precisionRecord->orbit.evaluator.newtres_.first_neumaier1_re_, precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -776,22 +714,22 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   }
 
   painter.setBrush(Qt::BrushStyle::NoBrush);
-  if (orbit_->evaluator.newtres_.first_neumaier2_im!=0)
+  if (precisionRecord->orbit.evaluator.newtres_.first_neumaier2_im!=0)
   {
     painter.setPen(QColor(0xff, 0x00, 0x00)); //Neumaier2_im
-    int circ_r=ldexp(abs(orbit_->evaluator.newtres_.first_neumaier2_im), position_->step_log);
+    int circ_r=ldexp(abs(precisionRecord->orbit.evaluator.newtres_.first_neumaier2_im), precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
       painter.drawEllipse(x-circ_r-2, y-circ_r-2, 2*circ_r+4, 2*circ_r+4);
     };
   };
-  if ((orbit_->evaluator.newtres_.first_neumaier2_im!=0) || (orbit_->evaluator.newtres_.first_neumaier2_re<0))
+  if ((precisionRecord->orbit.evaluator.newtres_.first_neumaier2_im!=0) || (precisionRecord->orbit.evaluator.newtres_.first_neumaier2_re<0))
   {
     painter.setPen(QColor(0xff, 0x00, 0xff)); //Neumaier2_mag
-    double mag=sqrt(orbit_->evaluator.newtres_.first_neumaier2_re*orbit_->evaluator.newtres_.first_neumaier2_re+
-                    orbit_->evaluator.newtres_.first_neumaier2_im*orbit_->evaluator.newtres_.first_neumaier2_im);
-    int circ_r=ldexp(mag, position_->step_log);
+    double mag=sqrt(precisionRecord->orbit.evaluator.newtres_.first_neumaier2_re*precisionRecord->orbit.evaluator.newtres_.first_neumaier2_re+
+                    precisionRecord->orbit.evaluator.newtres_.first_neumaier2_im*precisionRecord->orbit.evaluator.newtres_.first_neumaier2_im);
+    int circ_r=ldexp(mag, precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -801,7 +739,7 @@ void LaguerreModel::paintOrbit(ShareableImageWrapper image, int x, int y)
   else
   {
     painter.setPen(QColor(0xff, 0xff, 0xff)); //Neumaier2
-    int circ_r=ldexp(orbit_->evaluator.newtres_.first_neumaier2_re, position_->step_log);
+    int circ_r=ldexp(precisionRecord->orbit.evaluator.newtres_.first_neumaier2_re, precisionRecord->position.step_log);
     if ((circ_r>=1) && (circ_r<=10003))
     {
       painter.drawEllipse(x-circ_r, y-circ_r, 2*circ_r, 2*circ_r);
@@ -820,24 +758,22 @@ int LaguerreModel::writeToImage(ShareableImageWrapper image)
     return -1;
   timerWriteToImage.start();
   int indexOfWtiPoint, _discard;
-  wtiPoint->self_allocator._getRange(indexOfWtiPoint, _discard);
+  precisionRecord->wtiPoint.self_allocator._getRange(indexOfWtiPoint, _discard);
+  LaguerrePointStore *wtiStore;
   for (int y=0; y<imageHeight; y++)
     for (int x=0; x<imageWidth; x++)
     {
       bool knownenum=false;
       //MandelMath::worker_multi::Allocator allo(storeWorker->getAllocator(), (y*imageWidth+x)*LaguerrePoint::LEN, LaguerrePoint::LEN, nullptr);
       //LaguerrePoint data_(&pointStore_[y*imageWidth+x], &allo);
-      wtiPoint->store=&pointStore_[y*imageWidth+x];
-      {
-        currentWorker->assign_block(indexOfWtiPoint, storeWorker, (y*imageWidth+x)*LaguerrePoint::LEN, LaguerrePoint::LEN);
-      }
+      wtiStore=&pointStore_[y*imageWidth+x];
       //if ((x==222) && (y==170))
         //data->state=MandelPoint::State::stOutside;
       switch (_selectedPaintStyle)
       {
         case paintStyle::paintStyleCls:
         {
-          switch (wtiPoint->store->state)
+          switch (wtiStore->state)
           {
             case LaguerrePointStore::State::stUnknown:
               //image.image->setPixel(x, y, 0xffffffff);
@@ -846,14 +782,15 @@ int LaguerreModel::writeToImage(ShareableImageWrapper image)
               break;
             case LaguerrePointStore::State::stResolved:
             {
-              if (wtiPoint->store->iter==0)
+              if (wtiStore->iter==0)
                 image.image->setPixel(x, y, 0xff606060); //the dead pool
               else
               {
                 int r;
                 {
-                  double tr=currentWorker->toDouble(wtiPoint->fz_r.re);
-                  double ti=currentWorker->toDouble(wtiPoint->fz_r.im);
+                  precisionRecord->currentWorker->assign_block(indexOfWtiPoint, storeWorker, (y*imageWidth+x)*LaguerrePoint::LEN, LaguerrePoint::LEN);
+                  double tr=precisionRecord->currentWorker->toDouble(precisionRecord->wtiPoint.fz_r.re);
+                  double ti=precisionRecord->currentWorker->toDouble(precisionRecord->wtiPoint.fz_r.im);
                   if (tr*tr+ti*ti>1)
                     r=0xc0;
                   else
@@ -872,20 +809,20 @@ int LaguerreModel::writeToImage(ShareableImageWrapper image)
                   g=0x00+0x40*(data->firstM+1);
                 else
                   g=0xdf;*/
-                if (wtiPoint->store->firstM>=3)
+                if (wtiStore->firstM>=3)
                   g=0x7f;
-                else if (wtiPoint->store->firstM>=2)
-                  g=0xbf-0x40*(wtiPoint->store->firstM-2);
-                else if (wtiPoint->store->firstM>=1)
-                  g=0xff-0x40*(wtiPoint->store->firstM-1);
-                else if (wtiPoint->store->firstM>=0)
-                  g=0x00+0x40*(wtiPoint->store->firstM-0);
-                else if (wtiPoint->store->firstM>=-1)
-                  g=0x40+0x40*(wtiPoint->store->firstM+1);
+                else if (wtiStore->firstM>=2)
+                  g=0xbf-0x40*(wtiStore->firstM-2);
+                else if (wtiStore->firstM>=1)
+                  g=0xff-0x40*(wtiStore->firstM-1);
+                else if (wtiStore->firstM>=0)
+                  g=0x00+0x40*(wtiStore->firstM-0);
+                else if (wtiStore->firstM>=-1)
+                  g=0x40+0x40*(wtiStore->firstM+1);
                 else
                   g=0x80;
                 int b;
-                switch (wtiPoint->store->iter % 5)
+                switch (wtiStore->iter % 5)
                 {
                   case  0: b=0x00; break;
                   case  1: b=0xff; break;
@@ -921,7 +858,7 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
   {
     retryEffortFrom=-1;
     int quickrun=0;
-    MandelMath::complex &tmpc=params_->base;//will assign to currentParams.c (position.worker, &params.base_re_s_, &params.base_im_s, true);
+    MandelMath::complex &tmpc=precisionRecord->params.base;//will assign to currentParams.c (position.worker, &params.base_re_s_, &params.base_im_s, true);
     MandelMath::complex &root=evaluator->currentData.f;//(position.worker, &evaluator->currentData.f_re, &evaluator->currentData.f_im, true);
     for (int pi=0; pi<imageWidth*imageHeight; pi++)
     {
@@ -935,8 +872,8 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
       if (needsEval)
       {
         bool found=false;
-        for (int t=0; t<threadCount; t++)
-          if (threads[t]->currentParams.pixelIndex==pointIndex)
+        for (int t=0; t<precisionRecord->threadCount; t++)
+          if (precisionRecord->threads[t]->currentParams.pixelIndex==pointIndex)
           {
             found=true;
             break;
@@ -946,8 +883,8 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
         assert(evaluator->currentParams.pixelIndex==-1);
         if (!found)
         {
-          int phasex=(pointIndex%imageWidth-imageWidth/2+position_->cached_center_re_mod+32768)%32768;
-          int phasey=(pointIndex/imageWidth-imageHeight/2+position_->cached_center_im_mod+32768)%32768;
+          int phasex=(pointIndex%imageWidth-imageWidth/2+precisionRecord->position.cached_center_re_mod+32768)%32768;
+          int phasey=(pointIndex/imageWidth-imageHeight/2+precisionRecord->position.cached_center_im_mod+32768)%32768;
           //int effort=ctz16(phasex)+ctz16(phasey);
           int effort=MandelMath::ctz16(phasex | phasey);
           if (effort>8)
@@ -960,16 +897,16 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
           }
           else
           {
-            if (evaluator->currentWorker->ntype()!=position_->worker->ntype())
+            if (evaluator->currentWorker->ntype()!=precisionRecord->position.worker->ntype())
               dbgPoint();
             //evaluator->switchType(position.worker);
-            position_->pixelXtoRE(pointIndex%imageWidth - imageWidth/2, root.re);
-            position_->pixelYtoIM(imageHeight/2-pointIndex/imageWidth, root.im);
+            precisionRecord->position.pixelXtoRE(pointIndex%imageWidth - imageWidth/2, root.re);
+            precisionRecord->position.pixelYtoIM(imageHeight/2-pointIndex/imageWidth, root.im);
             evaluator->currentParams.epoch=epoch;
             evaluator->currentParams.pixelIndex=pointIndex;
-            if (params_->period>10)
+            if (precisionRecord->params.period>10)
             {
-              evaluator->startNewton(params_->period, &tmpc); //evaluator->currentData.f is additional hidden parameter
+              evaluator->startNewton(precisionRecord->params.period, &tmpc); //evaluator->currentData.f is additional hidden parameter
               _threadsWorking++;
               evaluator->timeOuter.start();
               lastGivenPointIndex_=pointIndex;
@@ -977,7 +914,7 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
             }
             else
             {
-              int result=evaluator->newton(params_->period, &tmpc, &root, true, 12);
+              int result=evaluator->newton(precisionRecord->params.period, &tmpc, &root, true, 12);
               donePixel1(evaluator, result);
               quickrun++;
               if (quickrun>=100)
@@ -1018,7 +955,7 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
       qDebug()<<"Finished pixel finished again";
     else*/
     {
-      if (position_->worker==nullptr)
+      if (me->currentWorker==nullptr)
         dbgPoint();
       else
       {
@@ -1067,117 +1004,44 @@ void LaguerreModel::selectedPrecisionChanged()
 {
   MandelMath::worker_multi *newWorker=nullptr;
   MandelMath::worker_multi *newStoreWorker=nullptr;
-  MandelMath::worker_multi::Allocator *newStoreAllocator=nullptr;
-  if (currentWorker!=nullptr)
+  int pointCount;
+  if (imageWidth<=0 || imageHeight<=0) //Qt begins with width=0, height=-13
+    pointCount=0;
+  else
+    pointCount=imageWidth*imageHeight;
+  MandelMath::worker_multi::Type newPrecision;
+  switch (_selectedPrecision)
   {
-    for (int t=threadCount-1; t>=0; t--)
-    {
-      threads[t]->wantStop=true;
-      threads[t]->quit();
-    }
-    for (int t=threadCount-1; t>=0; t--)
-    {
-      threads[t]->wait(1000);
-      delete threads[t];
-    }
-    delete threads;
-    threads=nullptr;
-    //keep old threadCount or we'd have to change worker length threadCount=0;
-
-    //bool empty=imageWidth<=0 || imageHeight<=0; //Qt begins with width=0, height=-13
-    switch (_selectedPrecision)
-    {
-      case precisionDouble:
-        newWorker=new MandelMath::worker_multi_double(currentWorker->getAllocator());
-        newStoreWorker=new MandelMath::worker_multi_double(storeWorker->getAllocator());
-        break;
+    using Type=MandelMath::worker_multi::Type;
+    case precisionDouble: newPrecision=Type::typeDouble; break;
 #if !ONLY_DOUBLE_WORKER
-      case precisionFloat128:
-        newWorker=new MandelMath::worker_multi_float128(currentWorker->getAllocator());
-        newStoreWorker=new MandelMath::worker_multi_float128(storeWorker->getAllocator());
-        break;
-      case precisionDDouble:
-        newWorker=new MandelMath::worker_multi_ddouble(currentWorker->getAllocator());
-        newStoreWorker=new MandelMath::worker_multi_ddouble(storeWorker->getAllocator());
-        break;
-      case precisionQDouble:
-        newWorker=new MandelMath::worker_multi_qdouble(currentWorker->getAllocator());
-        newStoreWorker=new MandelMath::worker_multi_qdouble(storeWorker->getAllocator());
-        break;
+    case precisionFloat128: newPrecision=Type::typeFloat128; break;
+    case precisionDDouble: newPrecision=Type::typeDDouble; break;
+    case precisionQDouble: newPrecision=Type::typeQDouble; break;
+    case precisionReal642: newPrecision=Type::typeReal642; break;
 #endif
-    }
-    newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), imageWidth*imageHeight*LaguerrePoint::LEN);//newStoreWorker->capacity);
+  }
+
+  if (precisionRecord!=nullptr)
+  {
+    newWorker=MandelMath::worker_multi::create(newPrecision, precisionRecord->currentWorker->getAllocator());
+    newStoreWorker=MandelMath::worker_multi::create(newPrecision, storeWorker->getAllocator());
   }
   else
   {
-    int pointCount;
-    if (imageWidth<=0 || imageHeight<=0) //Qt begins with width=0, height=-13
-      pointCount=0;
-    else
-      pointCount=imageWidth*imageHeight;
-    if (threadCount!=0)
-      dbgPoint();
-    threadCount=QThread::idealThreadCount()-1;
-    if (threadCount<1)
-      threadCount=1;
-    switch (_selectedPrecision)
-    {
-      case precisionDouble:
-        newWorker=new MandelMath::worker_multi_double(LaguerreModel::LEN);
-        newStoreWorker=new MandelMath::worker_multi_double(pointCount*LaguerrePoint::LEN);
-        break;
-#if !ONLY_DOUBLE_WORKER
-      case precisionFloat128:
-        newWorker=new MandelMath::worker_multi_float128(LaguerreModel::LEN);
-        newStoreWorker=new MandelMath::worker_multi_float128(pointCount*LaguerrePoint::LEN);
-        break;
-      case precisionDDouble:
-        newWorker=new MandelMath::worker_multi_ddouble(LaguerreModel::LEN);
-        newStoreWorker=new MandelMath::worker_multi_ddouble(pointCount*LaguerrePoint::LEN);
-        break;
-      case precisionQDouble:
-        newWorker=new MandelMath::worker_multi_qdouble(LaguerreModel::LEN);
-        newStoreWorker=new MandelMath::worker_multi_qdouble(pointCount*LaguerrePoint::LEN);
-        break;
-#endif
-    }
-    newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), pointCount*LaguerrePoint::LEN);
+    newWorker=MandelMath::worker_multi::create(newPrecision, LaguerreModel::LEN);
+    newStoreWorker=MandelMath::worker_multi::create(newPrecision, pointCount*LaguerrePoint::LEN);
   }
 
   {
-    MandelMath::worker_multi::Allocator *newparamsAllocator=new MandelMath::worker_multi::Allocator(newWorker->getAllocator(), Params::LEN);
-    Params *newParams=new Params(newparamsAllocator);
-    LaguerrePoint *newWtiPoint=new LaguerrePoint(nullptr, newWorker->getAllocator(), nullptr);
-    Position *newPosition=new Position(newWorker->getAllocator());
-    Orbit *newOrbit=new Orbit(newWorker->getAllocator());
-    newParams->assign(params_);
-    newPosition->assign(position_);
-    delete orbit_;
-    delete position_;
-    delete wtiPoint;
-    delete params_;
-    delete paramsAllocator;
-    paramsAllocator=newparamsAllocator;
-    params_=newParams;
-    wtiPoint=newWtiPoint;
-    position_=newPosition;
-    orbit_=newOrbit;
+    PrecisionRecord *newprecisionRecord=new PrecisionRecord(newWorker, precisionRecord, this);
+    delete precisionRecord;
+    precisionRecord=newprecisionRecord;
   }
 
-  threads=new MandelEvaluator *[threadCount];
-  for (int t=0; t<threadCount; t++)
-  {
-    threads[t]=new MandelEvaluator(newWorker->ntype(), false);
-    //threads[t].setHint(t);
-    QObject::connect(threads[t], &MandelEvaluator::doneNewton,
-                     this, &LaguerreModel::donePixel,
-                     Qt::ConnectionType::QueuedConnection);
-  }
-
-  delete currentWorker;
+  MandelMath::worker_multi::Allocator *newStoreAllocator=new MandelMath::worker_multi::Allocator(newStoreWorker->getAllocator(), pointCount*LaguerrePoint::LEN);
   delete storeAllocator;
   delete storeWorker;
-  currentWorker=newWorker;
   storeWorker=newStoreWorker;
   storeAllocator=newStoreAllocator;
 
@@ -1198,12 +1062,21 @@ void LaguerreModel::Params::assign(Params *src)
   };
 }
 
-LaguerreModel::Position::Position(MandelMath::worker_multi::Allocator *allocator):
+LaguerreModel::Position::Position(MandelMath::worker_multi::Allocator *allocator, Position *src):
   worker(allocator->worker), center(allocator)
 {
-  center.zero(-0.5, 0.0);
-  step_log=7;
-  step_size__=1.0/128;
+  if (src)
+  {
+    //keep preinitialized values center.zero(-0.5, 0.0);
+    step_log=src->step_log;
+    step_size__=src->step_size__;
+  }
+  else
+  {
+    center.zero(-0.5, 0.0);
+    step_log=7;
+    step_size__=1.0/128;
+  }
   updateCachedDepth();
 }
 
@@ -1348,7 +1221,7 @@ void LaguerreModel::Position::pixelYtoIM(int y, MandelMath::number_pointer resul
 
 LaguerreModel::Orbit::Orbit(MandelMath::worker_multi::Allocator *allocator): currentWorker(allocator->worker),
   /*evaluatorAllocator(worker, MandelEvaluator::LEN),*/ evaluator(allocator->worker->ntype(), true),
-  /*pointAllocator(allocator, LaguerrePoint::LEN),*/ pointDataStore(), pointData(&pointDataStore, allocator, nullptr),
+  /*pointAllocator(allocator, LaguerrePoint::LEN),*/ pointDataStore(), pointData(&pointDataStore, allocator),
   first_mu_re_(0), first_mu_im(0), first_mum_re_(0), first_mum_im_(0)
 {
 
@@ -1359,3 +1232,55 @@ LaguerreModel::Orbit::~Orbit()
 
 }
 
+
+LaguerreModel::PrecisionRecord::PrecisionRecord(MandelMath::worker_multi *newWorker, PrecisionRecord *source, LaguerreModel *doneReceiver):
+  currentWorker(newWorker),
+  paramsAllocator(newWorker->getAllocator(), Params::LEN), params(&paramsAllocator),
+  wtiPoint(nullptr, newWorker->getAllocator()),
+  position(newWorker->getAllocator(), source?&source->position:nullptr), orbit(newWorker->getAllocator()),
+  threadCount(source?source->threadCount:0), threads(nullptr)
+{
+  if (source)
+  {
+    params.assign(&source->params);
+    position.assign(&source->position);
+  }
+  else
+  {
+    params.assign(nullptr);
+    position.assign(nullptr);
+  }
+
+  if (threadCount<=0)
+  {
+    threadCount=QThread::idealThreadCount()-1;
+    if (threadCount<1)
+      threadCount=1;
+  };
+  threads=new MandelEvaluator *[threadCount];
+  for (int t=0; t<threadCount; t++)
+  {
+    threads[t]=new MandelEvaluator(newWorker->ntype(), false);
+    //threads[t].setHint(t);
+    QObject::connect(threads[t], &MandelEvaluator::doneNewton,
+                     doneReceiver, &LaguerreModel::donePixel,
+                     Qt::ConnectionType::QueuedConnection);
+  }
+}
+
+LaguerreModel::PrecisionRecord::~PrecisionRecord()
+{
+  for (int t=threadCount-1; t>=0; t--)
+  {
+    threads[t]->wantStop=true;
+    threads[t]->quit();
+  }
+  for (int t=threadCount-1; t>=0; t--)
+  {
+    threads[t]->wait(1000);
+    delete threads[t];
+  }
+  delete threads;
+  threads=nullptr;
+  threadCount=0;
+}

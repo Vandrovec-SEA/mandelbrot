@@ -33,6 +33,12 @@ union number_place //might have to switch to struct to allow inplace promote()
 
 typedef dd_real dq_real;
 
+struct real642
+{
+  double val1;
+  __float128 val2;
+};
+
 union number_pointer
 {
   double *asf64;
@@ -40,12 +46,14 @@ union number_pointer
   __float128 *asf128;
   dd_real *asdd;
   dq_real *asqd;
+  real642 *as642;
 #endif
   number_pointer(): asf64(nullptr) {}
   number_pointer(double *asf64): asf64(asf64) {}
   number_pointer(__float128 *asf128): asf128(asf128) {}
   number_pointer(dd_real *asdd): asdd(asdd) {}
   //number_pointer(dq_real *asqd): asqd(asqd) {}
+  number_pointer(real642 *as642): as642(as642) {}
 };
 
 #if 1 //faster
@@ -61,16 +69,12 @@ union number_pointer_c
 #endif
   number_pointer_c(): asf64(nullptr) {}
   number_pointer_c(double *asf64): asf64(asf64) {}
+  number_pointer_c(const real642 *as642): as642(as642) {}
   number_pointer_c(const number_pointer &src): asf64(src.asf64) {}
 };
 #endif
 
 class complex; //forward declaration for friend
-
-class upgrademe
-{
-
-};
 
 class worker_multi
 {
@@ -83,6 +87,7 @@ public:
               , typeFloat128
               , typeDDouble
               , typeQDouble
+              , typeReal642
 #endif
             };
 
@@ -96,9 +101,9 @@ public:
   public:
     worker_multi *worker;
     Allocator(int capacity); //fake constructor
-    Allocator(worker_multi *worker, int capacity, MandelMath::upgrademe *promote);
+    Allocator(worker_multi *worker, int capacity);
     Allocator(Allocator *allo, int capacity); //alloc a block
-    Allocator(Allocator *allo, int lowest, int count, upgrademe *relative); //reuse allocated block
+    Allocator(Allocator *allo, int lowest, int count); //reuse allocated block
     ~Allocator();
     bool checkFill() { return (allocUpTo==lowest+capacity); }
     bool checkIndex(int index) { return (index>=lowest && index<lowest+allocUpTo); }
@@ -118,10 +123,11 @@ protected:
 
 public:
   virtual double eps2() { return 1.23e-32; }
-  worker_multi(Type ntype, int capacity): _ntype(ntype), allocator(this, capacity, nullptr), capacity(capacity) { }
+  worker_multi(Type ntype, int capacity): _ntype(ntype), allocator(this, capacity), capacity(capacity) { }
   virtual ~worker_multi() { capacity=0; }
   virtual Type ntype() { return this->_ntype; }
   static worker_multi *create(Type ntype, int capacity);
+  static worker_multi *create(Type ntype, Allocator *allocator);
   Allocator *getAllocator() { return &allocator; }
   /*virtual number_pointer alloc()=0;
   virtual void alloc_array(int count)=0;
@@ -403,6 +409,64 @@ public:
   int toRound(const number_pointer_c store) override;
   double toDouble(const number_pointer_c store) override;
 };
+
+class worker_multi_real642: public worker_multi
+{
+  real642 *storage;
+  real642 tmp1;
+  real642 tmp2;
+protected:
+  virtual number_pointer getNumber(int index) override; //support for Allocator
+  virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
+public:
+  double eps2() override { return 9.28e-69;  /* 2^-(2*113) */ }
+
+  worker_multi_real642(int capacity): worker_multi(Type::typeReal642, capacity),
+      storage(new real642[capacity]) {}
+  worker_multi_real642(Allocator *source);
+  virtual ~worker_multi_real642();
+  virtual Type ntype() override { return typeReal642; }
+  /*virtual number_pointer alloc() override;
+  virtual void alloc_array(int count) override;
+  virtual void dealloc(number_pointer store) override;
+  virtual void dealloc_array(int count) override;*/
+  virtual void assign_block(int dst, worker_multi *src_worker, int src, int len) override; //for now, assert(this.ntype==src.ntype)
+  const real642 *_getStorage() { return storage; }
+
+  //void init_(number_store *store, void *placement, double val=0) override;
+  void zero(const number_pointer store, double val=0) override;
+  //void swap(const number_pointer store, const number_store src) override; //dst uninit + src init -> dst init + src uninit
+  void assign(const number_pointer store, const number_pointer_c src) override;// { store->assign<number_double>(*src); };
+  //void assignTo(number_store *src) override { store->assignTo_double(*src); };
+  //void cleanup(number_store *store) override { store->cleanup(Type::typeDouble); }
+  void chs(const number_pointer store) override;
+  void lshift(const number_pointer store, int shoft) override;
+  void round(const number_pointer store) override;
+  void frac(const number_pointer store) override; //-1<result<1
+  void mod1(const number_pointer store) override; //0<=result<1
+  void add_double(const number_pointer store, double x) override;
+  void mul_double(const number_pointer store, double x) override;
+  void add(const number_pointer store, const number_pointer_c other) override;
+  void sub(const number_pointer store, const number_pointer_c other) override;
+  void rsub(const number_pointer store, const number_pointer_c other) override;
+  void mul(const number_pointer store, const number_pointer_c other) override;
+  void sqr(const number_pointer store) override;
+  double radixfloor(const number_pointer_c store1, number_pointer_c store2) override; //nearest smaller power of 2 (1.5->1->1)
+  void recip(const number_pointer store) override;
+  void sqrt(const number_pointer store) override;
+  int compare(const number_pointer_c store, const number_pointer_c other) override; //return -1 if <, 0 if =, +1 if >
+  bool isequal(const number_pointer_c store, const number_pointer_c other) override;
+  bool is0(const number_pointer_c store) override;
+  bool isle(const number_pointer_c store, const number_pointer_c other) override;
+  bool isle0(const number_pointer_c store) override;
+  bool isl0(const number_pointer_c store) override;
+  bool isl1(const number_pointer_c store) override;
+
+  QString toString(const number_pointer_c store) override;
+  int toRound(const number_pointer_c store) override;
+  double toDouble(const number_pointer_c store) override;
+};
+
 #endif //ONLY_DOUBLE_WORKER
 
 double sqr_double(double x); //no one ever needed this function before year 2022, right?
@@ -447,7 +511,7 @@ public:
   //void recip_prepared();
   void sqrt();
   void add_double(double x);
-  //toDouble()
+  double toDouble() const;
 };
 
 class complex
@@ -501,7 +565,8 @@ public:
   const number_pointer_c dist2_tmp_(const complex *other) const;
   bool isequal(const complex *other) const;
   //assign_re(number_pointer) or assign_re(number) & assign_re_re(complex) & assign_re_im(complex)
-  //is0 used a few times (re==0 && im==0)
+  bool is0() const;
+  QString toString();
 };
 
 

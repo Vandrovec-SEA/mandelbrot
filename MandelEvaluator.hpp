@@ -23,7 +23,7 @@ struct LaguerrePoint
   static constexpr size_t LEN=4;
   MandelMath::worker_multi::Allocator self_allocator;
   LaguerrePointStore *store;
-  LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+  LaguerrePoint(LaguerrePointStore *store, MandelMath::worker_multi::Allocator *allocator);
   MandelMath::complex f;
   MandelMath::complex fz_r;
   LaguerrePoint &operator =(LaguerrePoint &src) = delete;
@@ -55,7 +55,7 @@ struct MandelPoint
   static constexpr size_t LEN=15;
   MandelMath::worker_multi::Allocator self_allocator;
   MandelPointStore *store;
-  MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+  MandelPoint(MandelPointStore *store, MandelMath::worker_multi::Allocator *allocator);
   MandelMath::complex f;
   MandelMath::complex fc_c; //fc_c, or fz_r if stPeriod2 or stPeriod3
   MandelMath::complex fz_r;
@@ -103,7 +103,7 @@ public:
   MandelMath::worker_multi::Allocator self_allocator;
   static constexpr size_t LEN=19;
   MandelMath::worker_multi *currentWorker;
-  LaguerreStep(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+  LaguerreStep(MandelMath::worker_multi::Allocator *allocator);
   //~LaguerreStep();
   //void switchType(MandelMath::number_worker *worker);
   //do one Laguerre step
@@ -138,7 +138,7 @@ public:
   MandelMath::worker_multi::Allocator self_allocator;
   static constexpr size_t LEN=22;
   MandelMath::worker_multi *currentWorker;
-  MandelLoopEvaluator(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+  MandelLoopEvaluator(MandelMath::worker_multi::Allocator *allocator);
   //~MandelLoopEvaluator();
   /*union Place
   {
@@ -247,7 +247,7 @@ public:
     double first_lagu1_re, first_lagu1_im, first_lagu1o_re, first_lagu1o_im;
     double firstMu_re_, firstMu_im, firstMum_re_, firstMum_im_;
     double accy_tostop, accy_multiplier; //in units of eps2()
-    NewtRes(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+    NewtRes(MandelMath::worker_multi::Allocator *allocator);
   } newtres_;
 protected:
   struct Eval
@@ -263,7 +263,7 @@ protected:
     //int lookper_startiter, lookper_prevGuess;
     //int lookper_lastGuess;
     //MandelMath::number_store lookper_totalFzmag;
-    Eval(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+    Eval(MandelMath::worker_multi::Allocator *allocator);
   } eval;
   struct Newt
   {
@@ -282,7 +282,7 @@ protected:
     MandelMath::complex newtX;
     MandelMath::complex fzzf;
     MandelMath::number tmp2;
-    Newt(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+    Newt(MandelMath::worker_multi::Allocator *allocator);
   } newt;
   struct InteriorInfo
   {
@@ -292,7 +292,7 @@ protected:
     MandelMath::number inte_abs;
     MandelMath::complex fz;
     MandelMath::number fz_mag;
-    InteriorInfo(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+    InteriorInfo(MandelMath::worker_multi::Allocator *allocator);
   } interior;
 public:
   struct Bulb
@@ -321,7 +321,7 @@ public:
     //MandelMath::number_store test_xn_re, test_xn_im;
     double dbg_guessmult;
     LaguerreStep lagu;
-    Bulb(MandelMath::worker_multi::Allocator *allocator, MandelMath::upgrademe *promote);
+    Bulb(MandelMath::worker_multi::Allocator *allocator);
   protected:
     void fixRnearBase(MandelMath::complex *r, const MandelMath::complex *c, int period, int *mult);
   public:
