@@ -1059,7 +1059,12 @@ void LaguerreModel::Params::assign(Params *src)
   if (src)
   {
     period=src->period;
-  };
+  }
+  else
+  {
+    base.zero(0, 0);
+    root.zero(0, 0);
+  }
 }
 
 LaguerreModel::Position::Position(MandelMath::worker_multi::Allocator *allocator, Position *src):

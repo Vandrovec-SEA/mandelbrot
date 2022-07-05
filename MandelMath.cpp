@@ -705,6 +705,14 @@ void worker_multi_double::getTmp12(number_pointer &t1, number_pointer &t2)
   t2.asf64=&tmp2;
 }
 
+void worker_multi_double::getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4)
+{
+  t1.asf64=&tmp1;
+  t2.asf64=&tmp2;
+  t3.asf64=&tmp3;
+  t4.asf64=&tmp4;
+}
+
 void worker_multi_double::assign_block(int dst, worker_multi *src_worker, int src, int len)
 {
   assert(src_worker->ntype()==Type::typeDouble);
@@ -945,6 +953,14 @@ void worker_multi_float128::getTmp12(number_pointer &t1, number_pointer &t2)
   t2.asf128=&tmp2;
 }
 
+void worker_multi_float128::getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4)
+{
+  t1.asf128=&tmp1;
+  t2.asf128=&tmp2;
+  t3.asf128=&tmp3;
+  t4.asf128=&tmp4;
+}
+
 void worker_multi_float128::assign_block(int dst, worker_multi *src_worker, int src, int len)
 {
   assert(src_worker->ntype()==Type::typeFloat128);
@@ -1075,14 +1091,25 @@ double worker_multi_float128::radixfloor(const number_pointer_c store1, const nu
 
 void worker_multi_float128::recip(const number_pointer store)
 {
-  *store.asf128 = 1/(*store.asf128);
+  *store.asf128 = __float128(1)/(*store.asf128);
 }
 
 void worker_multi_float128::sqrt(const number_pointer store)
 {
   double x=1/std::sqrt((double)*store.asf128);
-  double ax=x*(double)*store.asf128;
-  *store.asf128 = ax + double(*store.asf128 - __float128(ax)*__float128(ax))*x/2;
+  __float128 ax=x*(double)*store.asf128;
+  double tmp=*store.asf128 - ax*ax;
+  double tmp2=tmp*x/2;
+#if 0
+  *store.asf128 = ax + tmp2;//double(tmp)*x/2;
+  //error >30 eps because float128 is 112 bits but 2*double is 104 bits (256eps)
+#else
+  //one more iteration:
+  ax+=tmp2;
+  tmp=*store.asf128 - ax*ax;
+  tmp2=tmp*x/2;
+  *store.asf128 = ax + tmp2;
+#endif
   //x=1/(sqrt + e)
   //ax=a/(sqrt + e)+f
   //result=a/(sqrt + e)+f + (a - (a/(sqrt + e)+f)*(a/(sqrt + e)+f) + g)*x/2
@@ -1171,6 +1198,14 @@ void worker_multi_ddouble::getTmp12(number_pointer &t1, number_pointer &t2)
 {
   t1.asdd=&tmp1;
   t2.asdd=&tmp2;
+}
+
+void worker_multi_ddouble::getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4)
+{
+  t1.asdd=&tmp1;
+  t2.asdd=&tmp2;
+  t3.asdd=&tmp3;
+  t4.asdd=&tmp4;
 }
 
 worker_multi_ddouble::worker_multi_ddouble(Allocator *source):
@@ -1416,6 +1451,14 @@ void worker_multi_qdouble::getTmp12(number_pointer &t1, number_pointer &t2)
 {
   t1.asqd=&tmp1;
   t2.asqd=&tmp2;
+}
+
+void worker_multi_qdouble::getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4)
+{
+  t1.asqd=&tmp1;
+  t2.asqd=&tmp2;
+  t3.asqd=&tmp3;
+  t4.asqd=&tmp4;
 }
 
 worker_multi_qdouble::worker_multi_qdouble(Allocator *source):
@@ -1737,6 +1780,14 @@ void worker_multi_real642::getTmp12(number_pointer &t1, number_pointer &t2)
   t2.as642=&tmp2;
 }
 
+void worker_multi_real642::getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4)
+{
+  t1.as642=&tmp1;
+  t2.as642=&tmp2;
+  t3.as642=&tmp3;
+  t4.as642=&tmp4;
+}
+
 void worker_multi_real642::assign_block(int dst, worker_multi *src_worker, int src, int len)
 {
   assert(src_worker->ntype()==Type::typeReal642);
@@ -1982,6 +2033,11 @@ void number::add(const number_pointer_c other)
   worker->add(ptr, other);
 }
 
+void number::chs()
+{
+  worker->chs(ptr);
+}
+
 void number::sub(const number_pointer_c other)
 {
   worker->sub(ptr, other);
@@ -2042,6 +2098,12 @@ void complex::add(const complex *other)
   worker->add(im, other->im);
 }
 
+void complex::chs()
+{
+  worker->chs(re);
+  worker->chs(im);
+}
+
 void complex::sub(const complex *other)
 {
   worker->sub(re, other->re);
@@ -2081,6 +2143,7 @@ void complex::sqr()
   //if ((tmp1.store==nullptr) || (tmp2.store==nullptr))
   //  dbgPoint();
   //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+#if 0
   //r:=r*r-i*i
   //i=2*r*i
   worker->assign(tmp1, im);
@@ -2089,6 +2152,18 @@ void complex::sqr()
   worker->lshift(im, 1);
   worker->sqr(re);
   worker->sub(re, tmp1);
+#else
+  //r:=(r+i)*(r-i)
+  //i=2*r*i
+  //should be more precise + fewer mul
+  worker->assign(tmp1, re);
+  worker->sub(tmp1, im);    //r-i
+  worker->assign(tmp2, im);
+  worker->mul(im, re);
+  worker->lshift(im, 1);    //2*r*i
+  worker->add(re, tmp2);    //r+i
+  worker->mul(re, tmp1);
+#endif
 }
 
 void complex::recip()
@@ -2266,6 +2341,59 @@ bool complex::is0() const
   return worker->is0(re) && worker->is0(im);
 }
 
+int complex::mag_cmp_1()
+{
+  number_pointer tmp1, tmp2, tmp3, tmp4;
+  worker->getTmp1234(tmp1, tmp2, tmp3, tmp4);
+  //first reduce fz_re, fz_im to 2nd octant:
+  //  fz.re>=0, fz.im>=0, fz.im>=fz.re
+  worker->assign(tmp1, re);
+  worker->assign(tmp2, im);
+  if (worker->isle0(tmp1)) worker->chs(tmp1);
+  if (worker->isle0(tmp2)) worker->chs(tmp2);
+  if (!worker->isle(tmp1, tmp2))
+  {
+    worker->assign(tmp3, tmp1);
+    worker->assign(tmp1, tmp2);
+    worker->assign(tmp2, tmp3);
+  };
+  //im>=re, now check re^2+im^2>1
+  if ((worker->toDouble(tmp1)>=0.71) || //im>=re>=0.71 -> mag>=1.0082
+      (worker->toDouble(tmp2)>=1.01))   //im>=1.01 -> mag>=1.01
+  {
+    return 1;
+  }
+  else if (worker->toDouble(tmp2)<=0.70) //0.70>=im>=re -> mag<=0.98
+    return -1;
+  else
+  { //   re*re+im*im>1
+    //   gets inaccurate for re~0, im~1
+    //   im*im>1-re*re ; im>sqrt(1-re*re) ; im-1>sqrt(1-re*re)-1
+    //>> x=Sqrt(1-r*r)-1
+    //   could try x:=((-r2/16-1/8)*r2-1/2)*r2; //-r^6/16-r^4/8-r^2/2
+    //   but one cycle of Newton should work with any precision
+    //   (x+1)*(x+1)=(1-r*r)
+    //   x*x+2*x+r*r=0  f'=2*x+2
+    //   x2=x-(x*x+2*x+r*r)/(2*x+2)
+    //>> x2=(x*x-r*r)/(2*x+2)
+    //   x2=(x-1)(r*r-x*x)/(1-x*x)/2
+    worker->sqr(tmp1); //r^2
+    worker->chs(tmp1);
+    worker->assign(tmp3, tmp1);
+    worker->add_double(tmp3, 1);
+    worker->sqrt(tmp3);              //sqrt(1-r*r) = x+1
+    worker->assign(tmp4, tmp3);
+    worker->add_double(tmp4, -1);        //x
+    worker->sqr(tmp4);
+    worker->add(tmp1, tmp4);    //x*x-r*r
+    worker->recip(tmp3); //-1..-0.51 -> -1..-1.96
+    worker->mul(tmp1, tmp3);
+    worker->lshift(tmp1, -1);           //(x*x-r*r)/(x+1)/2 = better x
+    worker->add_double(tmp2, -1);
+    return worker->compare(tmp2, tmp1); //im-1 vs limit
+  };
+}
+
 QString complex::toString()
 {
   return worker->toString(re)+" +i* "+worker->toString(im);
@@ -2302,6 +2430,15 @@ void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in
       *res_im=-t1;
     };
   };
+}
+
+double radixfloor_double(double x1, double x2)
+{
+  int ilog1=std::ilogb(x1);
+  int ilog2=std::ilogb(x2);
+  if (ilog1<ilog2)
+    ilog1=ilog2;
+  return ldexp(1, ilog1);
 }
 
 /*

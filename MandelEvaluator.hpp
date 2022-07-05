@@ -136,7 +136,7 @@ class MandelLoopEvaluator
 {
 public:
   MandelMath::worker_multi::Allocator self_allocator;
-  static constexpr size_t LEN=22;
+  static constexpr size_t LEN=23;
   MandelMath::worker_multi *currentWorker;
   MandelLoopEvaluator(MandelMath::worker_multi::Allocator *allocator);
   //~MandelLoopEvaluator();
@@ -150,10 +150,11 @@ public:
   //eval F_c(c)
   bool evalg(int period, const MandelMath::complex *const c); //->f, f_c, f_cc
   //eval F_c(z)
-  bool eval2(int period, const MandelMath::complex *const c, const MandelMath::complex *const z); //->f, f_z, f_c, f_zz, f_zc, f_cc
-  bool eval_zz(int period, const MandelMath::complex *const c, const MandelMath::complex *const z); //->f, f_z, f_zz
+  bool eval2(int period, const MandelMath::complex *const c, const MandelMath::complex *const z);     //->f, f_z, f_zz, f_c, f_zc, f_cc
+  bool eval2_mag(int period, const MandelMath::complex *const c, const MandelMath::complex *const z); //->f, f_z, f_zz, f_c, f_zc, f_z_mag
+  bool eval_zz(int period, const MandelMath::complex *const c, const MandelMath::complex *const z);   //->f, f_z, f_zz
+  bool eval2zzc(int period, const MandelMath::complex *const c, const MandelMath::complex *const z);  //->f, f_z, f_zz, f_c, f_zc, f_cc, f_zzc
   bool eval_multi(int period, const MandelMath::complex *const c, const MandelMath::complex *const z, const MandelMath::complex *const f_z_target); //->f, f_z, f_zz, multi, first_multi
-  bool eval2zzc(int period, const MandelMath::complex *const c, const MandelMath::complex *const z); //->f, f_z, f_c, f_zz, f_zc, f_cc, f_zzc
 
   //inputs
   //MandelMath::number_store z_re, z_im;
@@ -170,6 +171,7 @@ public:
   int multi;
   MandelMath::complex first_multi;
   MandelMath::complex sumA;
+  MandelMath::number f_z_mag;
 
   //temporary
 protected:
@@ -187,6 +189,7 @@ public:
   constexpr static double LARGE_FLOAT2=1e60;
   constexpr static double MAGIC_MIN_SHRINK=1.5;
   constexpr static int MAX_PERIOD=8000;
+  int busyEpoch;
   MandelMath::worker_multi *currentWorker;
   MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dontRun);
   ~MandelEvaluator();
@@ -329,18 +332,27 @@ public:
     static constexpr int LEN=MandelLoopEvaluator::LEN+34+LaguerreStep::LEN;
   } bulb;
   static constexpr size_t LEN=ComputeParams::LEN+MandelPoint::LEN+LaguerrePoint::LEN+NewtRes::LEN+Eval::LEN+Newt::LEN+InteriorInfo::LEN+Bulb::LEN;
+public:
+  struct
+  {
+    std::function<bool (MandelEvaluator *me)> give;
+    std::function<bool (MandelEvaluator *me)> done;
+  } threaded;
 protected:
 
   protected:
-  int periodCheck(int period, const MandelMath::complex *c);
+  int periodCheck(int period, const MandelMath::complex *c, const MandelMath::complex *root_seed);
   int estimateInterior(int period, const MandelMath::complex *c, const MandelMath::complex *root);//, InteriorInfo *interior);
   void eval_until_bailout(const MandelMath::complex *c, MandelMath::complex *f, MandelMath::complex *fc_c);
   void evaluate();
 protected slots:
   void doCompute();
   void doNewton();
+public slots:
+  void doComputeThreaded();
 signals:
   void doneCompute(MandelEvaluator *me);
+  void doneComputeThreaded(MandelEvaluator *me);
   void doneNewton(MandelEvaluator *me, int result);
 };
 

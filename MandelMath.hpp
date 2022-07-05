@@ -119,6 +119,7 @@ protected:
   int capacity;
 
   virtual void getTmp12(number_pointer &t1, number_pointer &t2)=0;
+  virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4)=0;
   friend class MandelMath::complex;
 
 public:
@@ -177,11 +178,12 @@ public:
 class worker_multi_double: public worker_multi
 {
   double *storage;
-  double tmp1;
-  double tmp2;
+  double tmp1, tmp2;
+  double tmp3, tmp4;
 protected:
   virtual number_pointer getNumber(int index) override; //support for Allocator
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
+  virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
   double eps2() override { return 1.23e-32;  /* 2^-(2*53) */ }
 
@@ -237,11 +239,12 @@ public:
 class worker_multi_float128: public worker_multi
 {
   __float128 *storage;
-  __float128 tmp1;
-  __float128 tmp2;
+  __float128 tmp1, tmp2;
+  __float128 tmp3, tmp4;
 protected:
   virtual number_pointer getNumber(int index) override; //support for Allocator
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
+  virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
   double eps2() override { return 9.28e-69;  /* 2^-(2*113) */ }
 
@@ -295,11 +298,12 @@ class worker_multi_ddouble: public worker_multi
 {
 protected:
   dd_real *storage;
-  dd_real tmp1;
-  dd_real tmp2;
+  dd_real tmp1, tmp2;
+  dd_real tmp3, tmp4;
 protected:
   virtual number_pointer getNumber(int index) override; //support for Allocator
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
+  virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
   double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
 
@@ -355,11 +359,12 @@ class worker_multi_qdouble: public worker_multi
 {
 protected:
   dq_real *storage;
-  dq_real tmp1;
-  dq_real tmp2;
+  dq_real tmp1, tmp2;
+  dq_real tmp3, tmp4;
 protected:
   virtual number_pointer getNumber(int index) override; //support for Allocator
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
+  virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
   double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
   worker_multi_qdouble(int capacity): worker_multi(Type::typeQDouble, capacity),
@@ -413,11 +418,12 @@ public:
 class worker_multi_real642: public worker_multi
 {
   real642 *storage;
-  real642 tmp1;
-  real642 tmp2;
+  real642 tmp1, tmp2;
+  real642 tmp3, tmp4;
 protected:
   virtual number_pointer getNumber(int index) override; //support for Allocator
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
+  virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
   double eps2() override { return 9.28e-69;  /* 2^-(2*113) */ }
 
@@ -471,6 +477,7 @@ public:
 
 double sqr_double(double x); //no one ever needed this function before year 2022, right?
 void complex_double_sqrt(double *res_re, double *res_im, double in_re, double in_im); //res_re>=0
+double radixfloor_double(double x1, double x2);
 void complex_double_quadratic(double *res_re, double *res_im,
                               double a_re, double a_im, double b2_re, double b2_im, double c_re, double c_im);
 void complex_double_quadratic2(double *res1_re, double *res1_im,
@@ -503,7 +510,7 @@ public:
   //assign(number_pointer) to read complex.re
   void lshift(int shoft);
   void add(const number_pointer_c other);
-  //void chs
+  void chs();
   void sub(const number_pointer_c other);
   void sqr();
   void mul(const number_pointer_c other);
@@ -545,7 +552,7 @@ public:
   //assign(number_pointer_c re, im:=0)
   void lshift(int shoft);
   void add(const complex *other);
-  //chs()
+  void chs();
   void sub(const complex *other); //this=this-other
   void rsub(const complex *other); //this=other-this
   //add_double(r), add_double(r, i)
@@ -566,6 +573,7 @@ public:
   bool isequal(const complex *other) const;
   //assign_re(number_pointer) or assign_re(number) & assign_re_re(complex) & assign_re_im(complex)
   bool is0() const;
+  int mag_cmp_1(); //(mag() <=> 1) -> -1,0,+1
   QString toString();
 };
 

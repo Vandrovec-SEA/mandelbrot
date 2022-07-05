@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QImage>
+#include <QMutex>
 
 #include "ShareableImageWrapper.hpp"
 #include "MandelEvaluator.hpp"
@@ -76,8 +77,15 @@ public:
   int periodToIndex(int period);
   void giveWork(MandelEvaluator *worker);
   void donePixel1(MandelEvaluator *me);
+  void giveWorkToThread(MandelEvaluator *evaluator);
+  void donePixelInThread(MandelEvaluator *evaluator);
+protected:
+  QMutex threading_mutex;
+  bool giveWorkThreaded(MandelEvaluator *me);
+  bool doneWorkThreaded(MandelEvaluator *me);
 public slots:
   void donePixel(MandelEvaluator *me);
+  void doneWorkInThread(MandelEvaluator *me);
   void selectedPrecisionChanged();
 signals:
   void selectedPaintStyleChanged();
@@ -93,8 +101,8 @@ protected:
   int imageWidth;
   int imageHeight;
   //MandelPoint *pointStore;
-  int lastGivenPointIndex_;
-  int effortBonus_;
+  int nextGivenPointIndex;
+  int effortBonus;
   //constexpr static int MAX_EFFORT=17;//131072 iters;
   static constexpr int MAX_EFFORT=22;//
   QElapsedTimer timerWriteToImage;

@@ -166,14 +166,17 @@ Window {
                   dragging=2;
                 drag_last_x=mouse.x;
                 drag_last_y=mouse.y;
-                if (rbuttonViewMand.checked)
-                  mandelModel.paintOrbit(mandelImageCombiner.getOverlayImage(), mouse.x, mouse.y);
-                if (rbuttonViewLagu.checked)
-                  laguerreModel.paintOrbit(laguerreImageCombiner.getOverlayImage(), mouse.x, mouse.y);
             };
         }
         onReleased: {
             dragging=0;
+            if (mouse.button==Qt.LeftButton)
+            {
+                if (rbuttonViewMand.checked)
+                  mandelModel.paintOrbit(mandelImageCombiner.getOverlayImage(), mouse.x, mouse.y);
+                if (rbuttonViewLagu.checked)
+                  laguerreModel.paintOrbit(laguerreImageCombiner.getOverlayImage(), mouse.x, mouse.y);
+            }
             if (mouse.button==Qt.RightButton)
             {
                 mainPopupMenu.popup(mouse.x, mouse.y);
@@ -303,7 +306,14 @@ Window {
               labelXY.text=mandelModel.getTextXY();
               labelInfoGen.text=mandelModel.getTextInfoGen();
               labelInfoSpec.text=mandelModel.getTextInfoSpec();
-              busyIndicator.color=(mandelModel.threadsWorking===0?"green":mandelModel.threadsWorking===mandelModel.threadsMax?"red":"yellow")
+              if (mandelModel.threadsWorking===0)
+                busyIndicator.color="green";
+              else if (mandelModel.threadsWorking<mandelModel.threadsMax)
+                busyIndicator.color="yellow";
+              //else if (mandelModel.threadsWorking>mandelModel.threadsMax)
+              //  busyIndicator.color="blue"; //up to 2*threads during dragging... or more
+              else
+                busyIndicator.color="red";
               busyIndicator2.text=mandelModel.threadsWorking
             };
             if (rbuttonViewLagu.checked)
