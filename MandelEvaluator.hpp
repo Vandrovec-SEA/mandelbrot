@@ -36,7 +36,7 @@ struct LaguerrePoint
 
 struct MandelPointStore
 {
-  enum State { stUnknown, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter } state;
+  enum State { stUnknown, stWorking, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter } state;
   bool has_fc_r;
   int lookper_startiter, lookper_prevGuess_, lookper_lastGuess;
   bool lookper_nearr_dist_touched; //check if equal but only once; in theory should only happen at dist=0
@@ -204,6 +204,7 @@ public:
   //void switchType(MandelMath::number_worker *worker);
   bool wantStop;
   int pointsComputed;
+  qint64 totalNewtonIterations;
   QElapsedTimer timeOuter;
   qint64 timeOuterTotal;
   QElapsedTimer timeInner;
@@ -271,7 +272,7 @@ protected:
   struct Newt
   {
     MandelMath::worker_multi::Allocator self_allocator;
-    static constexpr int LEN=21;
+    static constexpr int LEN=23;
     MandelMath::complex bestr;
     MandelMath::complex f_r;
     //MandelMath::number_store fz_r_re, fz_r_im;
@@ -283,6 +284,7 @@ protected:
     MandelMath::complex laguG2;
     MandelMath::complex laguX;
     MandelMath::complex newtX;
+    MandelMath::complex prevX;
     MandelMath::complex fzzf;
     MandelMath::number tmp2;
     Newt(MandelMath::worker_multi::Allocator *allocator);
@@ -349,7 +351,7 @@ protected slots:
   void doCompute();
   void doNewton();
 public slots:
-  void doComputeThreaded();
+  void doComputeThreaded(int epoch);
 signals:
   void doneCompute(MandelEvaluator *me);
   void doneComputeThreaded(MandelEvaluator *me);

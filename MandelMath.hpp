@@ -123,7 +123,8 @@ protected:
   friend class MandelMath::complex;
 
 public:
-  virtual double eps2() { return 1.23e-32; }
+  virtual double eps2() { return 1.232596e-32; }
+  virtual double eps234() { return 1.17e-24; }
   worker_multi(Type ntype, int capacity): _ntype(ntype), allocator(this, capacity), capacity(capacity) { }
   virtual ~worker_multi() { capacity=0; }
   virtual Type ntype() { return this->_ntype; }
@@ -185,7 +186,8 @@ protected:
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
   virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
-  double eps2() override { return 1.23e-32;  /* 2^-(2*53) */ }
+  double eps2() override { return 1.232596e-32;  /* 2^-(2*53) rounded up */ }
+  double eps234() override { return 1.17e-24;  /* eps2^(3/4) */ }
 
   worker_multi_double(int capacity): worker_multi(Type::typeDouble, capacity),
       storage(new double[capacity]) {}
@@ -246,7 +248,8 @@ protected:
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
   virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
-  double eps2() override { return 9.28e-69;  /* 2^-(2*113) */ }
+  double eps2() override { return 9.27302e-69;  /* 2^-(2*113) rounded up */ }
+  double eps234() override { return 9.45e-52;  /* eps2^(3/4) */ }
 
   worker_multi_float128(int capacity): worker_multi(Type::typeFloat128, capacity),
       storage(new __float128[capacity]) {}
@@ -305,7 +308,8 @@ protected:
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
   virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
-  double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
+  double eps2() override { return 6.07717e-64; /* 2^-(2*(53+52)) rounded up */ }
+  double eps234() override { return 3.87e-48;  /* eps2^(3/4) */ }
 
   worker_multi_ddouble(int capacity): worker_multi(Type::typeDDouble, capacity),
     storage(new dd_real[capacity]) {}
@@ -366,7 +370,8 @@ protected:
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
   virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
-  double eps2() override { return 6.1e-64; /* 2^-(2*(53+52)) */ }
+  double eps2() override { return 6.07717e-64; /* 2^-(2*(53+52)) */ }
+  double eps234() override { return 3.87e-48;  /* eps2^(3/4) */ }
   worker_multi_qdouble(int capacity): worker_multi(Type::typeQDouble, capacity),
     storage(new dq_real[capacity+4]) {}
   worker_multi_qdouble(Allocator *source);
@@ -425,7 +430,8 @@ protected:
   virtual void getTmp12(number_pointer &t1, number_pointer &t2) override;
   virtual void getTmp1234(number_pointer &t1, number_pointer &t2, number_pointer &t3, number_pointer &t4) override;
 public:
-  double eps2() override { return 9.28e-69;  /* 2^-(2*113) */ }
+  double eps2() override { return 9.27302e-69;  /* 2^-(2*113) rounded up */ }
+  double eps234() override { return 9.45e-52;  /* eps2^(3/4) */ }
 
   worker_multi_real642(int capacity): worker_multi(Type::typeReal642, capacity),
       storage(new real642[capacity]) {}
@@ -558,7 +564,7 @@ public:
   //add_double(r), add_double(r, i)
   void sqr();
   void mul(const complex *other);
-  //mul(number or number_pointer_c)
+  //mul(number or number_pointer_c) maybe called "scale"
   //or mul_double, div_double using tmp (usually mul_int, div_int but also *(1/m-1/n))
   void recip();
   void recip_prepared();

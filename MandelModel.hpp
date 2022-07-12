@@ -90,6 +90,7 @@ public slots:
 signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
+  void triggerComputeThreaded(int epoch);
 protected:
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore

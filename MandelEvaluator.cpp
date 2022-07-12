@@ -1068,6 +1068,7 @@ bool MandelLoopEvaluator::eval2zzc(int period, const MandelMath::complex *c, con
 
 MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dontRun): QThread(nullptr),
   busyEpoch(0), currentWorker(MandelMath::worker_multi::create(ntype, LEN)),
+  totalNewtonIterations(0),
   params_allocator(currentWorker->getAllocator(), ComputeParams::LEN), currentParams(&params_allocator),
   /*currentDataAllocator(currentWorker->getAllocator(), MandelPoint::LEN),*/ currentData(&currentDataStore, currentWorker->getAllocator()),
   tmpLaguerrePoint(nullptr, currentWorker->getAllocator()),
@@ -1190,10 +1191,10 @@ void MandelEvaluator::doCompute()
   emit doneCompute(this);
 }
 
-void MandelEvaluator::doComputeThreaded()
+void MandelEvaluator::doComputeThreaded(int epoch)
 {
-  currentParams.epoch=busyEpoch;
-  while (threaded.give(this))
+  busyEpoch=epoch;
+  while (threaded.give(this))//debug && !wantStop)
   {
     evaluate();
     if (!threaded.done(this))
@@ -1864,6 +1865,7 @@ solve [0=0+d*C+e*R*C+f*C^2/2+g*R^3/6+h*R^2*C/2, -1=e*C+g*R^2/2+h*R*C, -124.79612
         //0.185 per=27720 at r=-1.2623031085342689 im=0.38359354974812726
         //0.121 [actually 0.00061 in float128] per=2310 at r=-1.2623031085359033 i=0.3835935497471468
         //0.0217 per=100 at 0.249571+i0.562510
+        //0.0332 per=280 at -0.5921925+i0.6198388
         *is_card=true;
       else if (dist_to_0<0.25)
         nop();
@@ -2224,6 +2226,7 @@ void MandelEvaluator::Bulb::fixRnearBase(MandelMath::complex *r, const MandelMat
 int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath::complex *r, const bool fastHoming, const int suggestedMultiplicity) //returns multiplicity
 { //TODO: suggestedMulti = maximumMultip ?
   double bestfm=1e10; //TODO: actually bestgm? g(z)=f(z)-z
+  double last_accepted_grmag=1e10;
   newt.bestr.assign(r);
   bool movedOff=false;
   //double accyBound=3e-28/(period*period);
@@ -2273,7 +2276,7 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
   //double accyBound=r_mag_rough*currentWorker->eps2()*period; //eps*sqrt(period) as eps bleeds out// 3e-28/(period*period);
   if (period<5)
   {
-    maxm=ldexp(1, period-1); //in theory up to n-1 but for Mandelbrot that's rarely the case
+    maxm=period+1; //actually for Mandelbrot it's at most p+1 roots nearby   ldexp(1, period-1); //in theory up to n-1 but for Mandelbrot that's rarely the case
     order1=ldexp(1, -period);
   }
   else if (period<1024)
@@ -2302,9 +2305,10 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     clever.mult=1;
   double cre=currentWorker->toDouble(c->re);
   double cim=currentWorker->toDouble(c->im);
+  newt.prevX.assign(r); //preferably zero(infinity, 0) but now we do if (newtonCycle>0)
   for (int newtonCycle=0; newtonCycle<50; newtonCycle++)
   {
-    newtres_.cyclesNeeded=newtonCycle;
+    newtres_.cyclesNeeded=newtonCycle+1;
     if ((movedOff) && (newtonCycle>10) && (order1>=0))
     {                                    //  p m -> p
       order1=-1;                         //  2 2    1
@@ -2316,41 +2320,6 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     newt.fzz_r.zero(0, 0);
     //TODO: can we skip computing fzz_r if order1<0? and remember last valid multiplicity or set it to 1
     //always half of eps_cumul10   double eps_cumul05=0.5;
-    double eps_cumul10=1;
-    double eps_cumul=1; //calc itself looks good, lemme start with 1 instead of 0
-    double eps_cumul2_=2;
-    int err_simple=0;
-    __float128 precise_re=currentWorker->toDouble(newt.f_r.re);
-    __float128 precise_im=currentWorker->toDouble(newt.f_r.im);
-#define TRACK_PRECISE 0
-#if TRACK_PRECISE
-    double fre=currentWorker->toDouble(newt.f_r.re);
-    double fim=currentWorker->toDouble(newt.f_r.im);
-    double eps_e=(nextafter(abs(fre), 1000)-abs(fre));
-    eps_e=std::ldexp(1, std::ilogb(fre));
-    double eps_f=(nextafter(abs(fim), 1000)-abs(fim));
-    eps_f=std::ldexp(1, std::ilogb(fim));
-    double eps_e2f2only=std::max(eps_e, eps_f);
-    /* { //I need to increase eps_cumul somewhere but don't know where, all looks good
-      double f_rough=currentWorker->radixfloor(f_r.re_s, c->re_s);
-      eps_cumul+=f_rough*f_rough;
-      f_rough=currentWorker->radixfloor(f_r.im_s, c->im_s);
-      eps_cumul+=f_rough*f_rough;
-    }*/
-    //very close to eps_cumul10   double err_cumul=0; //maybe sum(ln fz)/ln(final_fz) but similar to sum(1/fz)*final_fz
-    double EPSILON=ldexp(1, -53);
-    struct
-    {
-      __float128 re, im;
-      int woot;
-    } precise[9];
-    for (int i=0; i<9; i++)
-    {
-      precise[i].re=i*10;
-      precise[i].im=-i*10;
-      precise[i].woot=i;
-    }
-#endif
     //double fc_re=0, fc_im=0;
     for (int i=0; i<period; i++)
     {
@@ -2369,214 +2338,28 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
       newtres_.fz_r.mul(&newt.f_r);
       newtres_.fz_r.lshift(1);
 
-      /*
-      (a+-c+bi+-di)^2=
-        (a+bi)^2=a^2-b^2+2abi
-        (a+c+bi+di)^2=aa-bb+2abi +2ac-2bd +2adi+2bci +cc-dd+2cdi (base + new c + new d + second order)
-        (a+-c+bi+-di)^2=aa-bb+2abi +-2ac+-2bd +-2adi+-2bci +cc-dd+-2cdi (base + new c + new d + second order)
-        new c=2*(c*abs(a)+d*abs(b))   new d=2*(d*abs(a)+c*abs(b))
-      for c=d:
-        new c=2*c*(abs(a)+abs(b))  =  new d=2*c*(abs(a)+abs(b))
-      */
-      /*
-      re=(a+b+c+d)(a-b+c-d)=aa-bb+ab-ab +2ac-2bd+ad-ad+bc-bc +cc-dd+cd-cd
-      */
-      //eps_cumul05=4*eps_cumul05*f_r_mag+0.5;
-      eps_cumul10=4*eps_cumul10*f_r_mag+1;
-      eps_cumul=4*eps_cumul*f_r_mag; //error in f^2
-      eps_cumul2_=4*eps_cumul2_*f_r_mag; //shrink/expansion of error in f^2   (f+e)^2=f^2+2fe+e^2
-      //err_cumul+=1/currentWorker->toDouble(fz_r.getMagTmp());
-      if (fz_r_mag<=1)
-        err_simple++;;
-
-#if TRACK_PRECISE
-      double fre=currentWorker->toDouble(newt.f_r.re);
-      double fim=currentWorker->toDouble(newt.f_r.im);
-      precise[0].re=fre-eps_e*(__float128)EPSILON; precise[0].im=fim-eps_f*(__float128)EPSILON;
-      precise[1].re=fre;                           precise[1].im=fim-eps_f*(__float128)EPSILON;
-      precise[2].re=fre+eps_e*(__float128)EPSILON; precise[2].im=fim-eps_f*(__float128)EPSILON;
-      precise[3].re=fre-eps_e*(__float128)EPSILON; precise[3].im=fim;
-      precise[4].re=fre;                           precise[4].im=fim;
-      precise[5].re=fre+eps_e*(__float128)EPSILON; precise[5].im=fim;
-      precise[6].re=fre-eps_e*(__float128)EPSILON; precise[6].im=fim+eps_f*(__float128)EPSILON;
-      precise[7].re=fre;                           precise[7].im=fim+eps_f*(__float128)EPSILON;
-      precise[8].re=fre+eps_e*(__float128)EPSILON; precise[8].im=fim+eps_f*(__float128)EPSILON;
-      double fsum=abs(fre)+abs(fim);
-      double fdif=abs(abs(fre)-abs(fim));
-      double eps_sum=eps_e+eps_f+std::ldexp(0.5, std::ilogb(fsum));
-      double eps_dif=eps_e+eps_f+std::ldexp(0.5, std::ilogb(fdif));
-      double new_eps_e=eps_sum*fdif+eps_dif*fsum;//later +std::ldexp(0.5, std::ilogb(fsum*fdif));
-      double new_eps_f=2*(eps_e*abs(fim)+eps_f*abs(fre));//later +std::ldexp(0.5, std::ilogb(2*fre*fim));
-      eps_e=new_eps_e;
-      eps_f=new_eps_f;
-      //eps_e2f2only=max wrong 2*eps_e2f2only*2*max(fre, fim) + (2*max(fre, fim)+1)*0.5eps(f_re_new),
-      //                 2*eps_e2f2only*(fre+fim)                            +0.5eps(f_im_new);
-      for (int i=0; i<9; i++)
-      {
-        __float128 t=precise[i].re*precise[i].re-precise[i].im*precise[i].im;
-        precise[i].im=2*precise[i].re*precise[i].im;
-        precise[i].re=t;
-      }
-#endif
       //f:=f^2
       newt.f_r.sqr();
-      {
-        __float128 t=(precise_re+precise_im)*(precise_re-precise_im);
-        precise_im*=2*precise_re;
-        precise_re=t;
-      }
-      double f_rough=2*currentWorker->radixfloor(newt.f_r.re, newt.f_r.re);
-      eps_cumul2_+=f_rough*f_rough;
-      f_rough=2*currentWorker->radixfloor(newt.f_r.im, newt.f_r.im);
-      eps_cumul2_+=f_rough*f_rough;
-      double eps_actual=(MandelMath::sqr_double(precise_re-currentWorker->toDouble(newt.f_r.re))+MandelMath::sqr_double(precise_im-currentWorker->toDouble(newt.f_r.im)))*ldexp(1, 106);
-      if (eps_actual>eps_cumul)
-        nop();
-      if (eps_actual>eps_cumul2_)
-        nop(); //TODO: explore why, about 1.25* bigger
-#if TRACK_PRECISE
-      fre=currentWorker->toDouble(newt.f_r.re);
-      fim=currentWorker->toDouble(newt.f_r.im);
-      eps_e+=std::ldexp(0.5, std::ilogb(fre));
-      eps_f+=std::ldexp(0.5, std::ilogb(fim));
-      eps_e2f2only+=MandelMath::radixfloor_double(fre, fim)/2;
-      double actual_e=0;
-      double actual_f=0;
-      for (int i=0; i<9; i++)
-      {
-        double x=abs(precise[i].re-fre);
-        if (x>actual_e)
-          actual_e=x;
-        x=abs(precise[i].im-fim);
-        if (x>actual_f)
-          actual_f=x;
-      }
-      actual_e/=EPSILON;
-      actual_f/=EPSILON;
-      if (actual_e>eps_e*1.01+10*EPSILON || actual_f>eps_f*1.01+10*EPSILON) //for f==0 we guess eps=0 but actual is of order EPSILON which we neglect
-        nop();
-#endif
 
-      //small prev+c->big after   err+=a_eps/2
-      //big prev+c->small after   err+=max(a_eps, p_eps)/2
       //f:=f+c
-      //fre=currentWorker->toDouble(newt.f_r.re);
-      //fim=currentWorker->toDouble(newt.f_r.im);
-#if TRACK_PRECISE
-      precise[0].re=fre-eps_e*(__float128)EPSILON; precise[0].im=fim-eps_f*(__float128)EPSILON;
-      precise[1].re=fre;                           precise[1].im=fim-eps_f*(__float128)EPSILON;
-      precise[2].re=fre+eps_e*(__float128)EPSILON; precise[2].im=fim-eps_f*(__float128)EPSILON;
-      precise[3].re=fre-eps_e*(__float128)EPSILON; precise[3].im=fim;
-      precise[4].re=fre;                           precise[4].im=fim;
-      precise[5].re=fre+eps_e*(__float128)EPSILON; precise[5].im=fim;
-      precise[6].re=fre-eps_e*(__float128)EPSILON; precise[6].im=fim+eps_f*(__float128)EPSILON;
-      precise[7].re=fre;                           precise[7].im=fim+eps_f*(__float128)EPSILON;
-      precise[8].re=fre+eps_e*(__float128)EPSILON; precise[8].im=fim+eps_f*(__float128)EPSILON;
-#endif
       if (i+1==period)
       { //f+=c-r instead of f:=f+c-r for better precision
         newt.laguG.assign(c);
         newt.laguG.sub(r);
         newt.f_r.add(&newt.laguG);
-        precise_re+=cre-currentWorker->toDouble(r->re);
-        precise_im+=cim-currentWorker->toDouble(r->im);
       }
       else
       {
         newt.f_r.add(c);
-        precise_re+=cre;
-        precise_im+=cim;
       }
-#if TRACK_PRECISE
-      double e_eps=MandelMath::radixfloor_double(fre, currentWorker->toDouble(newt.f_r.re))/2;
-      double f_eps=MandelMath::radixfloor_double(fim, currentWorker->toDouble(newt.f_r.im))/2;
-      eps_e+=e_eps;
-      eps_f+=f_eps;
-      eps_e2f2only+=std::max(e_eps, f_eps);
-      for (int i=0; i<9; i++)
-      {
-        precise[i].re+=cre;
-        precise[i].im+=cim;
-      }
-      actual_e=0;
-      actual_f=0;
-      fre=currentWorker->toDouble(newt.f_r.re);
-      fim=currentWorker->toDouble(newt.f_r.im);
-      for (int i=0; i<9; i++)
-      {
-        double x=abs(precise[i].re-fre);
-        if (x>actual_e)
-          actual_e=x;
-        x=abs(precise[i].im-fim);
-        if (x>actual_f)
-          actual_f=x;
-      }
-      actual_e/=EPSILON;
-      actual_f/=EPSILON;
-      if (actual_e>eps_e*1.01 || actual_f>eps_f*1.01)
-        nop();
-#endif
-
-      f_rough=currentWorker->radixfloor(newt.f_r.re, c->re);
-      eps_cumul+=f_rough*f_rough; //error in ...+c
-      f_rough=currentWorker->radixfloor(newt.f_r.im, c->im);
-      eps_cumul+=f_rough*f_rough;
-      f_rough=2*currentWorker->radixfloor(newt.f_r.re, newt.f_r.re);
-      eps_cumul2_+=f_rough*f_rough;
-      f_rough=2*currentWorker->radixfloor(newt.f_r.im, newt.f_r.im);
-      eps_cumul2_+=f_rough*f_rough;
-      eps_actual=(MandelMath::sqr_double(precise_re-currentWorker->toDouble(newt.f_r.re))+MandelMath::sqr_double(precise_im-currentWorker->toDouble(newt.f_r.im)))*ldexp(1, 106);
-      if (eps_actual>eps_cumul)
-        nop();
-      if (eps_actual>eps_cumul2_)
-        nop(); //TODO: explore why, about 1.1* bigger
     }
-    //double fz_r_mag=currentWorker->toDouble(fz_r.getMagTmp()); //ff1m in original code
     //g(r)=f(r)-r, gz(r)=fz(r)-1
-#if TRACK_PRECISE
-    eps_e+=std::ldexp(0.5, std::ilogb(currentWorker->toDouble(newt.f_r.re))); //max(f, f-r)=f because f-r~0
-    eps_f+=std::ldexp(0.5, std::ilogb(currentWorker->toDouble(newt.f_r.im)));
-#endif
     //newt.f_r.sub(r);
     currentWorker->add_double(newtres_.fz_r.re, -1);
-    /*{
-      //if r->r+2/3eps rounds to r+eps, r+eps->r+eps-2/3eps rounds to r:
-      //  we always get at least 1eps error
-      //  even though actual error is eps/3
-      //adding epsilon of r seems best
-      double r_rough=currentWorker->radixfloor(r->re, r->re);
-      eps_cumul+=r_rough*r_rough;
-      eps_cumul2_+=4*r_rough*r_rough;
-      r_rough=currentWorker->radixfloor(r->im, r->im);
-      eps_cumul+=r_rough*r_rough;
-      eps_cumul2_+=4*r_rough*r_rough;
-    }
-    precise_re-=currentWorker->toDouble(r->re);
-    precise_im-=currentWorker->toDouble(r->im);*/
-    {
-      /*double rre=currentWorker->toDouble(r->re);
-      double test1=nextafter(abs(rre), 1000)-abs(rre); //0.8->2^-53
-      double rim=currentWorker->toDouble(r->im);
-      double test2=nextafter(abs(rim), 1000)-abs(rim);
-      (void)test1; (void)test2;*/
-      double min_eps=MandelMath::sqr_double(currentWorker->radixfloor(r->re, r->re))+ //0.8->0.25
-                     MandelMath::sqr_double(currentWorker->radixfloor(r->im, r->im));
-      if (eps_cumul<min_eps)
-        eps_cumul=min_eps;
-      if (eps_cumul2_<min_eps)
-        eps_cumul2_=min_eps;
-    }
-    double eps_actual=(MandelMath::sqr_double(precise_re-currentWorker->toDouble(newt.f_r.re))+MandelMath::sqr_double(precise_im-currentWorker->toDouble(newt.f_r.im)))*ldexp(1, 106);
-    if (eps_actual>eps_cumul)
-      nop();
-    if (eps_actual>eps_cumul2_)
-      nop(); //TODO: explore why, about 1.1* bigger
     double g_r_mag=newt.f_r.getMag_double();
     double gz_r_mag=newtres_.fz_r.getMag_double();
     //newtres_.accy_tostop=eps_cumul;//r_mag_rough*eps_cumul10;
-    newtres_.accy_tostop=1.92* //increase if we don't converge at newtonCycle<50
-                         eps_cumul*
-                         std::max(1.0, gz_r_mag); //necessary for gz_r_mag>1; cannot go under eps because step in r is eps/gz
+    newtres_.accy_tostop=std::max(1.0, g_r_mag/currentWorker->eps2());
     newtres_.accy_multiplier=std::max(1.0, 1/gz_r_mag);
 #if CLEVER_FIX
 //c=-0.7499 p=2
@@ -2609,65 +2392,51 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     }
     else
     {
-      /*does not trigger for double precision
-      if (gz_r_mag<1e-39)
-      { //one more multi-iter?
-        //zero ffm is solved with triedZeroFfm
-        if (clever.mult>0)
-          return clever.mult;
-        else
-          return 1;
-      };*/
-
       //new conditions
       //the one legit reason to end: step<2^-53/|f'| (for |f'|<1) exactly because step*|f'|=2^-53
       //    |f|/|f'|<2^-53/|f'|
       //    |f|^2<2^-106=1.23e-32
       //if (g_r_mag<1.0*r_mag_rough*currentWorker->eps2()) //maybe up to (1+gz_r_mag)*r_mag*eps2*log2(period)
       //if (g_r_mag<eps_cumul10*r_mag_rough*currentWorker->eps2()) //maybe up to (1+gz_r_mag)*r_mag*eps2*log2(period)
-      magic_last=g_r_mag/newtres_.accy_tostop/currentWorker->eps2();
-      if (newtonCycle>15 && magic_last>magic_max)
-        magic_max=magic_last;
-      if (g_r_mag<newtres_.accy_tostop*currentWorker->eps2())
-        return lastm;
-        // !!any adjustments must be absorbed into accy_tostop
-        //for per=11, rough=1, gz_m=0.13: around 6.3<x/eps<3.2 (biggest that won't improve < x <smallest that will improve)
-        //for per=20, rough=0.5, gz=0.0216: 0.063<x<0.5
-        //for per=94, rough=1, gz_m=0.56: 9.3<x<~61; gz_m=6e-5: 9.1<x<7.3
-        //for per=63(7), rough=4, gz_m=1.5e-6: 9.9<x<5.6
 
-#if 0
-      if (//maybe eps2*period but 1e-29 is too much ((gz_r_mag>1e-6) && (g_r_mag/gz_r_mag<accyBound)) || //((fm<NEWTON_EPSILON) and (ffm>1e-6)) or //check just f on single roots
-          //(should be handled with newer eps computation   (g_r_mag<1e-20) && (g_r_mag/gz_r_mag<accyBound)) || //for high period - and high derivative - we cannot minimize f given the finite precision of root
-           ((gz_r_mag<1e-6) && (g_r_mag/gz_r_mag<2.1e-30)))   //check f/ff on multiple roots
-      { //r is good enough already
-        return lastm;
-      };
-      if ((g_r_mag<2e-38) && (gz_r_mag<3e-9)) //ffm: >8e-10
-      { //close to be but not multiple
-        if (clever.mult>0)
-          return clever.mult;
+      //even better: once step<eps^(3/4), choose between previous and current root and that's it
+      if (newtonCycle>0 && (newt.newtX.getMag_double()<currentWorker->eps234() ||
+                            last_accepted_grmag<currentWorker->eps234())) //for multiple root, step never gets small, but value does
+      {
+        if (g_r_mag<last_accepted_grmag)
+          return lastm;
         else
-          return 1;
-      };
-#endif
-      /*if ((fz_r_mag>0.5) && (g_r_mag/fz_r_mag<accyBound2))
-      { //cannot improve because of limited precision
-        return lastm;
-      };*/
+        {
+          r->assign(&newt.prevX);
+          newtres_.accy_tostop=std::max(1.0, last_accepted_grmag/currentWorker->eps2());
+          return lastm;
+        }
+      }
     };
-    if (r->isequal(&newt.bestr) &&
+    /*if (r->isequal(&newt.bestr) &&
         (bestfm<1e10) && (newtonCycle>2)) //Lagu can cycle in first 2 cycles
     { //Laguerre can cycle (at least my version), e.g. per=2, c=-0.6640625-0.015625i, r=-0.614213552325963974-0,0179149806499481201i
       if (g_r_mag<6*eps_cumul10*r_mag_rough*currentWorker->eps2()) //should be tested above but maybe use different margin here?
         return lastm;
       return 0; //just fail and try again next time
-    };
+    };*/
     if (g_r_mag<bestfm)
     {
       bestfm=g_r_mag;
       newt.bestr.assign(r);
     };
+    if (g_r_mag>last_accepted_grmag)//+1000*newtres_.accy_tostop*currentWorker->eps2())
+    { //g_r_mag didn't go down and it wasn't because of limited precision
+      //no reason to continue from here, polynomials don't have poles
+      //undo half of last step and try again
+      newt.newtX.lshift(-1);
+      //r->add(&newt.newtX);
+      r->assign(&newt.prevX); //Justin Case
+      r->sub(&newt.newtX);
+      continue;
+    }
+    else
+      last_accepted_grmag=g_r_mag; //almost like bestfm but not quite because of changing eps_cumul
 
     /* derive Laguerre's method, multiplicity m!=1, order of poly=n
     assume roots A and B, distance a=z-A away, others b=z-B away
@@ -3262,13 +3031,11 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
         };
       }
     }
-    if ((g_r_mag>bestfm) && (newtonCycle>30))
-    {
-      newt.newtX.lshift(-2);
-    };
+
+    newt.prevX.assign(r);
     r->sub(&newt.newtX);
   } //for newtonCycle
-  return lastm; //if we get here, increase magic multiplier at newtres.accy_tostop
+  return lastm; //if we get here and |newtres.fz_r|<1, increase magic multiplier at newtres.accy_tostop
 }
 
 //result=0 means the period check failed; -1 means the check failed and the root returned is invalid
@@ -3303,6 +3070,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   if (aroundCount==0)
     aroundCount=1; //a fresh nearestIteration means this is a new atom, so mult=2
   int newtRes=newton(period, c, &currentData.root, true, 1+aroundCount);
+  totalNewtonIterations+=newtres_.cyclesNeeded;
   if (newtRes<=0)
   { //this, of course, means that Newton() should be improved, not that there's a problem with the numbers
     return -1; //e.g. evaluating the initial guess mand.root leads to overflow immediately
@@ -3400,7 +3168,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
     else*/
       return -1;//inevitably result:=-1
   }
-//  if (ff.re*ff.re+ff.im*ff.im)<=1 then
+z//  if (ff.re*ff.re+ff.im*ff.im)<=1 then
 //  if ((f_z_r-1)<=0{1.1e-19}) then //Newton does not solve exactly (at least for multiple roots)
 
   //evaluate F_c^period at r ; its abs must be below 1 for the point to attract
@@ -3532,7 +3300,10 @@ void MandelEvaluator::evaluate()
     eval.near0fmag.assign(currentData.near0f.getMag_tmp_()); //TODO: update on changing near0f
   }
 
-  for (; (currentData.store->iter<currentParams.maxiter_) && (currentData.store->state==MandelPointStore::State::stUnknown) && !wantStop; currentData.store->iter++)
+  for (; (currentData.store->iter<currentParams.maxiter_) &&
+         (currentData.store->state==MandelPointStore::State::stWorking) &&
+         !wantStop;
+       currentData.store->iter++)
   {
     if (currentData.store->iter%(3*currentData.store->near0iter) ==0)
     {
@@ -3822,7 +3593,8 @@ MandelEvaluator::Newt::Newt(MandelMath::worker_multi::Allocator *allocator):
   self_allocator(allocator, LEN),
   bestr(&self_allocator), f_r(&self_allocator), fzz_r(&self_allocator), tmp1(&self_allocator),
   laguH(&self_allocator), laguG(&self_allocator), laguG2(&self_allocator),
-  laguX(&self_allocator), newtX(&self_allocator), fzzf(&self_allocator), tmp2(&self_allocator)
+  laguX(&self_allocator), newtX(&self_allocator), prevX(&self_allocator),
+  fzzf(&self_allocator), tmp2(&self_allocator)
 {
   assert(self_allocator.checkFill());
 }
