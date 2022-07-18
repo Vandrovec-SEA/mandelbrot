@@ -190,7 +190,7 @@ public:
   double eps234() override { return 1.17e-24;  /* eps2^(3/4) */ }
 
   worker_multi_double(int capacity): worker_multi(Type::typeDouble, capacity),
-      storage(new double[capacity]) {}
+      storage(new double[capacity]) { }//for (int i=0; i<capacity; i++) storage[i]=std::numeric_limits<double>::signaling_NaN(); }
   //worker_multi_double(worker_multi *source);
   worker_multi_double(Allocator *source);
   virtual ~worker_multi_double() override;

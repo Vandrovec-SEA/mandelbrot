@@ -152,7 +152,7 @@ public:
   //eval F_c(z)
   bool eval2(int period, const MandelMath::complex *const c, const MandelMath::complex *const z);     //->f, f_z, f_zz, f_c, f_zc, f_cc
   bool eval2_mag(int period, const MandelMath::complex *const c, const MandelMath::complex *const z); //->f, f_z, f_zz, f_c, f_zc, f_z_mag
-  bool eval_zz(int period, const MandelMath::complex *const c, const MandelMath::complex *const z);   //->f, f_z, f_zz
+  bool eval_zz(int period, const MandelMath::complex *const c, const MandelMath::complex *const z, bool minusR);   //->f, f_z, f_zz
   bool eval2zzc(int period, const MandelMath::complex *const c, const MandelMath::complex *const z);  //->f, f_z, f_zz, f_c, f_zc, f_cc, f_zzc
   bool eval_multi(int period, const MandelMath::complex *const c, const MandelMath::complex *const z, const MandelMath::complex *const f_z_target); //->f, f_z, f_zz, multi, first_multi
 
@@ -272,7 +272,7 @@ protected:
   struct Newt
   {
     MandelMath::worker_multi::Allocator self_allocator;
-    static constexpr int LEN=23;
+    static constexpr int LEN=25;
     MandelMath::complex bestr;
     MandelMath::complex f_r;
     //MandelMath::number_store fz_r_re, fz_r_im;
@@ -284,7 +284,8 @@ protected:
     MandelMath::complex laguG2;
     MandelMath::complex laguX;
     MandelMath::complex newtX;
-    MandelMath::complex prevX;
+    MandelMath::complex prevR;
+    MandelMath::complex prevGz;
     MandelMath::complex fzzf;
     MandelMath::number tmp2;
     Newt(MandelMath::worker_multi::Allocator *allocator);

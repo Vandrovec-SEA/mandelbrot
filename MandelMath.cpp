@@ -2266,6 +2266,7 @@ const number_pointer_c complex::getMag1_tmp() const
   //if ((tmp1_s==nullptr) || (tmp2.store==nullptr))
   //  dbgPoint();
   //assert((tmp1.store!=nullptr) && (tmp2.store!=nullptr));
+  //TODO: merge with mag_cmp_1
   number_pointer tmp1, tmp2;
   worker->getTmp12(tmp1, tmp2);
   worker->assign(tmp1, re);
