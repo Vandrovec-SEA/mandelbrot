@@ -76,16 +76,11 @@ public:
 
   QVector<int> periodToIndexCache;
   int periodToIndex(int period);
-  void giveWork(MandelEvaluator *worker);
-  void donePixel1(MandelEvaluator *me);
-  void giveWorkToThread(MandelEvaluator *evaluator);
-  void donePixelInThread(MandelEvaluator *evaluator);
 protected:
   QReadWriteLock threading_mutex_;
   bool giveWorkThreaded(MandelEvaluator *me);
-  bool doneWorkThreaded_(MandelEvaluator *me, bool giveWork);
+  bool doneWorkThreaded(MandelEvaluator *me, bool giveWork);
 public slots:
-  void donePixel(MandelEvaluator *me);
   void doneWorkInThread(MandelEvaluator *me);
   void selectedPrecisionChanged();
 signals:

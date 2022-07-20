@@ -52,14 +52,15 @@ void LaguerrePoint::zero(const MandelMath::complex *c)
   store->iter=0;
 }
 
-MandelPointStore::MandelPointStore(): state(State::stUnknown), iter(0)
+MandelPointStore::MandelPointStore(): wstate(WorkState::stIdle), rstate(ResultState::stUnknown_), iter(0)
 {
 
 }
 
 void MandelPointStore::assign(const MandelPointStore *src)
 {
-  state.store(src->state.load());
+  wstate.store(src->wstate.load());
+  rstate=src->rstate;
   iter=src->iter;
   has_fc_r=src->has_fc_r;
   lookper_startiter=src->lookper_startiter;
@@ -115,7 +116,8 @@ void MandelPoint::zero(const MandelMath::complex *c)
   store->period=0;
   root.zero(0, 0);
 
-  store->state=MandelPointStore::State::stUnknown;
+  store->wstate=MandelPointStore::WorkState::stIdle;
+  store->rstate=MandelPointStore::ResultState::stUnknown_;
   store->iter=0;
   store->newton_iter=0;
   store->exterior_avoids=-1;
@@ -1123,7 +1125,7 @@ void MandelEvaluator::simple_double(double cr, double ci, MandelPoint &data, int
   {
     if (zr*zr+zi*zi>4)
     {
-      data.store->state=MandelPointStore::State::stOutside;
+      data.store->rstate=MandelPointStore::ResultState::stOutside;
       data.store->iter=iter;
       data.f.zero(zr, zi);
       return;
@@ -3159,7 +3161,9 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   }
   if (ori_over1<-0.001)
   {
-    double dist_around=1.665*16*(newtres_.accy_multiplier*newtres_.accy_tostop)*currentWorker->eps2();
+    //x=dist_around
+    //f^p(r)=r+eps && f^p(r+x)=f^p(r)+f^p'*x => x=eps/f^p' so the principle should be good
+    double dist_around=2.051*16*(newtres_.accy_multiplier*newtres_.accy_tostop)*currentWorker->eps2();
       //maybe *period or something instead of 16?
       //1.097*16 for period=35 first=1
       //1.137*16 for period=43 first=1
@@ -3167,7 +3171,9 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
       //1.1591*16 for period=9 first=1
       //1.2389*16 for period=98 first=1
       //1.2930*16 for period=34 first=1
-      2.050*16 for period=7680 first=1536//1.6644*16 for period=46 first=1
+      //1.6644*16 for period=46 first=1
+      //2.0500*16 for period=7680 first=1536
+      //3.0196*16 for period=68 first=1
     newt.f_r.assign(&currentData.root);
     newtres_.fz_r.zero(1, 0);
     eval.fz_mag1.zero(1); //ignore first pass
@@ -3552,7 +3558,7 @@ void MandelEvaluator::eval_until_bailout(const MandelMath::complex *c, MandelMat
     double fc_c_mag=fc_c->getMag_double();
     if (fc_c_mag>LARGE_FLOAT2)
     {
-      currentData.store->state=MandelPointStore::State::stBoundary;
+      currentData.store->rstate=MandelPointStore::ResultState::stBoundary;
       return;
     };
     //f:=f^2+c
@@ -3569,7 +3575,7 @@ void MandelEvaluator::evaluate()
   }
 
   for (; (currentData.store->iter<currentParams.maxiter_) &&
-         (currentData.store->state==MandelPointStore::State::stWorking) &&
+         (currentData.store->rstate==MandelPointStore::ResultState::stUnknown_) &&
          this->workIfEpoch==this->busyEpoch;
        currentData.store->iter++)
   {
@@ -3592,11 +3598,11 @@ void MandelEvaluator::evaluate()
     MandelMath::number_pointer_c f_mag=currentData.f.getMag_tmp_();
     if (currentWorker->toDouble(f_mag)>4)
     {
-      currentData.store->state=MandelPointStore::State::stOutside;
+      currentData.store->rstate=MandelPointStore::ResultState::stOutside;
       //theory says the relative error in estimate is less than 3/bailout for large bailout
       //so lets move out a bit
       eval_until_bailout(&currentParams.c, &currentData.f, &currentData.fc_c); //may switch state to stBoundary
-      if (currentData.store->state!=MandelPointStore::State::stOutside)
+      if (currentData.store->rstate!=MandelPointStore::ResultState::stOutside)
       {
         //currentWorker->zero(&currentData.exterior_avoids, 0);
         //currentWorker->zero(&currentData.exterior_hits, 0);
@@ -3659,7 +3665,7 @@ void MandelEvaluator::evaluate()
     double fc_c_mag=currentData.fc_c.getMag_double();
     if (fc_c_mag>1e57)
     {
-      currentData.store->state=MandelPointStore::State::stBoundary;
+      currentData.store->rstate=MandelPointStore::ResultState::stBoundary;
       currentData.store->exterior_avoids=0;
       currentData.store->exterior_hits=0;
       break;
@@ -3667,7 +3673,7 @@ void MandelEvaluator::evaluate()
     double fz_c_mag=currentWorker->toDouble(currentData.fz_c_mag.ptr);
     if (fz_c_mag>1e60)
     {
-      currentData.store->state=MandelPointStore::State::stDiverge;
+      currentData.store->rstate=MandelPointStore::ResultState::stDiverge;
       currentData.store->exterior_avoids=0;
       currentData.store->exterior_hits=0;
       break;
@@ -3799,18 +3805,18 @@ void MandelEvaluator::evaluate()
       };
       if (foundperiod>0)
       {
-        currentData.store->state=MandelPointStore::State::stPeriod2;
+        currentData.store->rstate=MandelPointStore::ResultState::stPeriod2;
         currentData.store->period=foundperiod;
         currentData.store->newton_iter=newtres_.cyclesNeeded;
         currentData.store->period=estimateInterior(foundperiod, &currentParams.c, &currentData.root);
         if (currentWorker->isl0(interior.inte_abs.ptr))
-          currentData.store->state=MandelPointStore::State::stMisiur;
+          currentData.store->rstate=MandelPointStore::ResultState::stMisiur;
         else
         {
           currentData.store->interior=interior.inte_abs.toDouble();
           currentData.fz_r.assign(&interior.fz); //d/dz F_c(r)
           if (testperiod!=currentData.store->period)
-            currentData.store->state=MandelPointStore::State::stPeriod3;
+            currentData.store->rstate=MandelPointStore::ResultState::stPeriod3;
         }
         //currentWorker->assign(&currentData.fc_c_re, &eval.fz_r_re);
         //currentWorker->assign(&currentData.fc_c_im, &eval.fz_r_im);
@@ -3826,8 +3832,8 @@ void MandelEvaluator::evaluate()
   }
   //data.state=MandelPoint::State::stMaxIter;
   if (!currentData.store->has_fc_r && currentParams.want_fc_r &&
-      ((currentData.store->state==MandelPointStore::State::stPeriod2) ||
-       (currentData.store->state==MandelPointStore::State::stPeriod3)))
+      ((currentData.store->rstate==MandelPointStore::ResultState::stPeriod2) ||
+       (currentData.store->rstate==MandelPointStore::ResultState::stPeriod3)))
   {
     this->bulb.bulbe.eval2(currentData.store->period, &currentParams.c, &currentData.root);
     currentData.fc_c.assign(&bulb.bulbe.f_c);

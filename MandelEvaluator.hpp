@@ -38,8 +38,10 @@ struct MandelPointStore
 {
   //TODO: split into state_working { idle, working, resolved }, result { unknown, period2, ... }
   //because we still work on known result for fc_r
-  enum State { stUnknown, stWorking, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter };
-  std::atomic<State> state;
+  enum WorkState { stIdle, stWorking, stDone };
+  std::atomic<WorkState> wstate;
+  enum ResultState { stUnknown_, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter };
+  ResultState rstate;
   bool has_fc_r;
   int lookper_startiter, lookper_prevGuess_, lookper_lastGuess;
   bool lookper_nearr_dist_touched; //check if equal but only once; in theory should only happen at dist=0
