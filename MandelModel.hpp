@@ -3,7 +3,8 @@
 
 #include <QObject>
 #include <QImage>
-#include <QMutex>
+//#include <QMutex>
+#include <QReadWriteLock>
 
 #include "ShareableImageWrapper.hpp"
 #include "MandelEvaluator.hpp"
@@ -80,9 +81,9 @@ public:
   void giveWorkToThread(MandelEvaluator *evaluator);
   void donePixelInThread(MandelEvaluator *evaluator);
 protected:
-  QMutex threading_mutex;
+  QReadWriteLock threading_mutex_;
   bool giveWorkThreaded(MandelEvaluator *me);
-  bool doneWorkThreaded(MandelEvaluator *me);
+  bool doneWorkThreaded_(MandelEvaluator *me, bool giveWork);
 public slots:
   void donePixel(MandelEvaluator *me);
   void doneWorkInThread(MandelEvaluator *me);

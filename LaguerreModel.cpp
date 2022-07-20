@@ -908,7 +908,7 @@ void LaguerreModel::giveWork(MandelEvaluator *evaluator)
             {
               evaluator->startNewton(precisionRecord->params.period, &tmpc); //evaluator->currentData.f is additional hidden parameter
               _threadsWorking++;
-              evaluator->timeOuter.start();
+              evaluator->timeOuter_.start();
               lastGivenPointIndex_=pointIndex;
               return;
             }
@@ -994,7 +994,7 @@ void LaguerreModel::donePixel1(MandelEvaluator *me, int result)
 
 void LaguerreModel::donePixel(MandelEvaluator *me, int result)
 {
-  me->timeOuterTotal+=me->timeOuter.nsecsElapsed();
+  me->timeOuterTotal_+=me->timeOuter_.nsecsElapsed();
   _threadsWorking--;
   donePixel1(me, result);
   giveWork(me);
@@ -1277,7 +1277,7 @@ LaguerreModel::PrecisionRecord::~PrecisionRecord()
 {
   for (int t=threadCount-1; t>=0; t--)
   {
-    threads[t]->wantStop=true;
+    threads[t]->workIfEpoch=-1;
     threads[t]->quit();
   }
   for (int t=threadCount-1; t>=0; t--)

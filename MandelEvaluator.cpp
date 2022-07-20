@@ -6,6 +6,7 @@
 
 #define USE_GCD_FOR_CHECKPERIOD 0
 #define CLEVER_FIX 0
+#define THREADED_DONE_GIVE_WORK 0
 
 #define assert(x) { if (!(x)) dbgPoint(); }
 
@@ -58,7 +59,7 @@ MandelPointStore::MandelPointStore(): state(State::stUnknown), iter(0)
 
 void MandelPointStore::assign(const MandelPointStore *src)
 {
-  state=src->state;
+  state.store(src->state.load());
   iter=src->iter;
   has_fc_r=src->has_fc_r;
   lookper_startiter=src->lookper_startiter;
@@ -1098,12 +1099,13 @@ MandelEvaluator::MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dont
   if (!dontRun)
     QThread::start(QThread::Priority::LowestPriority);
   assert(currentWorker->getAllocator()->checkFill());
-  wantStop=false;
+  workIfEpoch=-1;
   pointsComputed=0;
-  timeOuterTotal=0;
-  timeInnerTotal=0;
-  timeInvokePostTotal=0;
-  timeInvokeSwitchTotal=0;
+  timeOuterTotal_=0;
+  timeInnerTotal_=0;
+  timeInvokePostTotal_=0;
+  timeInvokeSwitchTotal_=0;
+  timeThreadedTotal=0;
   if (!dontRun)
     QObject::moveToThread(this);
 }
@@ -1188,35 +1190,59 @@ bool MandelEvaluator::startCompute(/*const MandelPoint *data,*/ int quick_route)
     pointsComputed++;
     return false;
   };
-  timeInvoke.start();
+  timeInvoke_.start();
   QMetaObject::invokeMethod(this,
                             &MandelEvaluator::doCompute,
                             Qt::ConnectionType::QueuedConnection);
-  timeInvokePostTotal+=timeInvoke.nsecsElapsed();
+  timeInvokePostTotal_+=timeInvoke_.nsecsElapsed();
   return true;
 }
 
 void MandelEvaluator::doCompute()
 {
-  timeInvokeSwitchTotal+=timeInvoke.nsecsElapsed();
-  timeInner.start();
+  timeInvokeSwitchTotal_+=timeInvoke_.nsecsElapsed();
+  timeInner_.start();
   //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
   evaluate();
   pointsComputed++;
   //msleep(10);
-  timeInnerTotal+=timeInner.nsecsElapsed();
+  timeInnerTotal_+=timeInner_.nsecsElapsed();
   emit doneCompute(this);
 }
 
 void MandelEvaluator::doComputeThreaded(int epoch)
 {
   busyEpoch=epoch;
-  while (threaded.give(this))//debug && !wantStop)
+  timeThreaded.start();
+#if THREADED_DONE_GIVE_WORK
+  if (threaded.give(this)) //debug && !wantStop)
+#endif
   {
-    evaluate();
-    if (!threaded.done(this))
-      break;
+    for (;;)
+    {
+      timeInvoke_.start();
+#if THREADED_DONE_GIVE_WORK
+#else
+      if (!threaded.give(this)) //debug && !wantStop)
+        break;
+#endif
+      timeInvokePostTotal_+=timeInvoke_.nsecsElapsed();
+      timeInner_.start();
+      evaluate();
+      timeInnerTotal_+=timeInner_.nsecsElapsed();
+      timeOuter_.start();
+      if (!threaded.done(this, THREADED_DONE_GIVE_WORK))
+        break;
+      timeOuterTotal_+=timeOuter_.nsecsElapsed();
+    }
+    /*while (threaded.give(this))//debug && !wantStop)
+    {
+      evaluate();
+      if (!threaded.done(this))
+        break;
+    }*/
   }
+  timeThreadedTotal+=timeThreaded.nsecsElapsed();
   emit doneComputeThreaded(this);
 }
 
@@ -3141,7 +3167,7 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
       //1.1591*16 for period=9 first=1
       //1.2389*16 for period=98 first=1
       //1.2930*16 for period=34 first=1
-      //1.6644*16 for period=46 first=1
+      2.050*16 for period=7680 first=1536//1.6644*16 for period=46 first=1
     newt.f_r.assign(&currentData.root);
     newtres_.fz_r.zero(1, 0);
     eval.fz_mag1.zero(1); //ignore first pass
@@ -3544,7 +3570,7 @@ void MandelEvaluator::evaluate()
 
   for (; (currentData.store->iter<currentParams.maxiter_) &&
          (currentData.store->state==MandelPointStore::State::stWorking) &&
-         !wantStop;
+         this->workIfEpoch==this->busyEpoch;
        currentData.store->iter++)
   {
     if (currentData.store->iter%(3*currentData.store->near0iter) ==0)

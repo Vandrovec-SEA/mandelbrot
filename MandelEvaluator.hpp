@@ -36,7 +36,10 @@ struct LaguerrePoint
 
 struct MandelPointStore
 {
-  enum State { stUnknown, stWorking, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter } state;
+  //TODO: split into state_working { idle, working, resolved }, result { unknown, period2, ... }
+  //because we still work on known result for fc_r
+  enum State { stUnknown, stWorking, stOutside, stOutAngle, stBoundary, stMisiur, stDiverge, stPeriod2, stPeriod3, stMaxIter };
+  std::atomic<State> state;
   bool has_fc_r;
   int lookper_startiter, lookper_prevGuess_, lookper_lastGuess;
   bool lookper_nearr_dist_touched; //check if equal but only once; in theory should only happen at dist=0
@@ -202,16 +205,18 @@ public:
   //MandelMath::number_worker::Type currentType;
   //MandelMath::worker_multi::Allocator *currentAllocator;
   //void switchType(MandelMath::number_worker *worker);
-  bool wantStop;
+  int workIfEpoch;
   int pointsComputed;
   qint64 totalNewtonIterations;
-  QElapsedTimer timeOuter;
-  qint64 timeOuterTotal;
-  QElapsedTimer timeInner;
-  qint64 timeInnerTotal;
-  QElapsedTimer timeInvoke;
-  qint64 timeInvokePostTotal;
-  qint64 timeInvokeSwitchTotal;
+  QElapsedTimer timeThreaded;
+  qint64 timeThreadedTotal;
+  QElapsedTimer timeOuter_;
+  qint64 timeOuterTotal_;
+  QElapsedTimer timeInner_;
+  qint64 timeInnerTotal_;
+  QElapsedTimer timeInvoke_;
+  qint64 timeInvokePostTotal_;
+  qint64 timeInvokeSwitchTotal_;
 
   MandelMath::worker_multi::Allocator params_allocator;
   struct ComputeParams
@@ -339,7 +344,7 @@ public:
   struct
   {
     std::function<bool (MandelEvaluator *me)> give;
-    std::function<bool (MandelEvaluator *me)> done;
+    std::function<bool (MandelEvaluator *me, bool giveWork)> done;
   } threaded;
 protected:
 

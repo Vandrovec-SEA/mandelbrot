@@ -306,6 +306,7 @@ Window {
               labelXY.text=mandelModel.getTextXY();
               labelInfoGen.text=mandelModel.getTextInfoGen();
               labelInfoSpec.text=mandelModel.getTextInfoSpec();
+              mandelModel.getTimes();
               if (mandelModel.threadsWorking===0)
                 busyIndicator.color="green";
               else if (mandelModel.threadsWorking<mandelModel.threadsMax)
