@@ -2466,7 +2466,7 @@ void complex_double_quadratic(double *res_re, double *res_im,
   (F3)  x1=    -(c/b)/(1+sqrt(1-a*c/b^2))      good for b>0 (cancellation for x2)
   (F3')        -(c)/(b+-sqrt(b^2-a*c))         good except both b,c small e.g. 0
 
-  Muller's method: B=2b
+  Muller's method: B=2b   2c/(-B+-sqrt(B^2-4ac))
   x1,x2= c/(-b+-sqrt(b^2-ac))     -c/(b+sqrt(b^2-ac))
   x1,x2= c/b/(-1+-sqrt(1-ac/b^2))
   */
@@ -2495,7 +2495,7 @@ void complex_double_quadratic(double *res_re, double *res_im,
     *res_im=-(c_im*t1_re-c_re*t1_im)/t1m; //-c/(b+sqrt(b^2-a*c))
   }
   else
-  {
+  { //when? wlog. a=1: b+sqrt(b^2-c)<1, full b/a+sqrt(b^2/a^2-c/a)<1
     t1_re=2*b2_re-t1_re;//b2_re-d_re;
     t1_im=2*b2_im-t1_im;//b2_im-d_im;
     *res_re=-(t1_re*a_re+t1_im*a_im)/am;

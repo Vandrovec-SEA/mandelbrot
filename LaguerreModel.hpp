@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QImage>
+#include <QReadWriteLock>
 
 #include "ShareableImageWrapper.hpp"
 #include "MandelEvaluator.hpp"
@@ -17,11 +18,10 @@ public:
                       MandelMath::worker_multi *new_worker, MandelMath::worker_multi *new_sworker, LaguerrePointStore *new_store, int new_width, int new_height, const MandelMath::complex *new_c,
                       int inlog, int new_step_log);
   Q_INVOKABLE void setParams(ShareableViewInfo viewInfo);
-  void setView_(const MandelMath::complex *c, double scale);
+  void setView(const MandelMath::complex *c, double scale);
   Q_INVOKABLE void drag(double delta_x, double delta_y);
   Q_INVOKABLE void zoom(double x, double y, int inlog);
   Q_INVOKABLE void setImageSize(int width, int height);
-  //void setWorker(MandelMath::worker_multi *newWorker);
   void startNewEpoch();
   void giveWorkAll();
   Q_INVOKABLE int writeToImage(ShareableImageWrapper img);
@@ -39,8 +39,8 @@ public:
     int period;
     MandelMath::complex base;
     MandelMath::complex root;
-    Params(MandelMath::worker_multi::Allocator *allocator);
-    void assign(Params *src);
+    Params(MandelMath::worker_multi::Allocator *allocator, const Params *source);
+    //void assign(Params *src);
   };
 
 
@@ -75,27 +75,29 @@ public:
   precision getselectedPrecision() { return _selectedPrecision; }
   void setselectedPrecision(precision ps) { _selectedPrecision=ps; emit selectedPrecisionChange(); }
 
-  void giveWork(MandelEvaluator *worker);
-  void donePixel1(MandelEvaluator *me, int result);
+protected:
+  QReadWriteLock threading_mutex;
+  int giveWorkThreaded(MandelEvaluator *me);
+  int doneWorkThreaded(MandelEvaluator *me, int result, bool giveWork);
 public slots:
-  void donePixel(MandelEvaluator *me, int result);
+  void doneWorkInThread(MandelEvaluator *me);
   void selectedPrecisionChanged();
 signals:
   void selectedPaintStyleChanged();
   void selectedPrecisionChange();
+  void triggerLaguerreThreaded(int epoch);
 protected:
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore
-  LaguerrePointStore *pointStore_;
+  LaguerrePointStore *pointStore;
   //constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
-  //LaguerrePoint *pointStore;
-  int lastGivenPointIndex_;
+  int nextGivenPointIndex;
   int effortBonus;
-  //constexpr static int MAX_EFFORT=17;//18;
+  //constexpr static int MAX_EFFORT=17;//131072 iters;
   QElapsedTimer timerWriteToImage;
 
   struct Position
@@ -107,10 +109,9 @@ protected:
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    Position(MandelMath::worker_multi::Allocator *allocator, Position *src);
+    Position(MandelMath::worker_multi::Allocator *allocator, const Position *source);
     ~Position();
-    void assign(Position *src);
-    //void setNumberType(MandelMath::worker_multi::Type ntype);
+    //void assign(Position *src);
     void setView(const MandelMath::complex *c, double scale);
     void move(int delta_x, int delta_y);
     void scale(int inlog, int center_x, int center_y);
@@ -131,7 +132,6 @@ protected:
     ~Orbit();
     constexpr static int LEN=0*MandelEvaluator::LEN+LaguerrePoint::LEN;
   };
-  constexpr static int LEN=Params::LEN+LaguerrePoint::LEN+Position::LEN+Orbit::LEN  +4;
   struct PrecisionRecord
   {
     MandelMath::worker_multi *currentWorker; //for Position and Orbit
@@ -144,11 +144,8 @@ protected:
     MandelEvaluator **threads;
     PrecisionRecord(MandelMath::worker_multi *newWorker, PrecisionRecord *source, LaguerreModel *doneReceiver);
     ~PrecisionRecord();
+    constexpr static int LEN=Params::LEN+LaguerrePoint::LEN+Position::LEN+Orbit::LEN  +4;
   } *precisionRecord;
-signals:
-  void doneWork(MandelEvaluator *evaluator);
-protected slots:
-  void giveWork1(MandelEvaluator *me) { giveWork(me); }
 };
 
 #endif // LAGUERREMODEL_H

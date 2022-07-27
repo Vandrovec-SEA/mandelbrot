@@ -10,7 +10,8 @@ enum NewtonNaiveChoice { nc03, nc05, nc08, ncWide, nc100, nc90_, nc80, nc60, ncC
 
 struct LaguerrePointStore
 {
-  enum State { stUnknown, stResolved, stFail } state;
+  enum State { stUnknown, stWorking, stResolved, stFail };
+  std::atomic<State> state;
   double firstM;
   NewtonNaiveChoice naiveChoice;
   int iter;
@@ -194,6 +195,7 @@ public:
   constexpr static double LARGE_FLOAT2=1e60;
   constexpr static double MAGIC_MIN_SHRINK=1.5;
   constexpr static int MAX_PERIOD=8000;
+  int threaded_errorcode;
   int busyEpoch;
   MandelMath::worker_multi *currentWorker;
   MandelEvaluator(MandelMath::worker_multi::Type ntype, bool dontRun);
@@ -254,6 +256,7 @@ public:
     NewtonNaiveChoice naiveChoice;
     double first_neumaier1_re_, first_neumaier1_im_; //circle enclosing 1 but not 2 roots (approx)
     double first_neumaier2_re, first_neumaier2_im;   //circle enclosing 2 but not 3 roots (approx) (never valid without  f''')
+    double ostrowski_r1c, ostrowski_r1x, ostrowski_r2c;
     //double first_lagum_re, first_lagum_im;
     double first_lagu1_re, first_lagu1_im, first_lagu1o_re, first_lagu1o_im;
     double firstMu_re_, firstMu_im, firstMum_re_, firstMum_im_;
@@ -345,13 +348,14 @@ public:
 public:
   struct
   {
-    std::function<bool (MandelEvaluator *me)> give;
-    std::function<bool (MandelEvaluator *me, bool giveWork)> done;
+    std::function<int (MandelEvaluator *me)> give;
+    std::function<int (MandelEvaluator *me, bool giveWork)> done;
+    std::function<int (MandelEvaluator *me, int result, bool giveWork)> doneNewton;
   } threaded;
 protected:
 
   protected:
-  int periodCheck(int period, const MandelMath::complex *c, const MandelMath::complex *root_seed);
+  int periodCheck(int period, const MandelMath::complex *c, const MandelMath::complex *root_seed, bool exactMatch);
   int estimateInterior(int period, const MandelMath::complex *c, const MandelMath::complex *root);//, InteriorInfo *interior);
   void eval_until_bailout(const MandelMath::complex *c, MandelMath::complex *f, MandelMath::complex *fc_c);
   void evaluate();
@@ -360,10 +364,12 @@ protected slots:
   void doNewton();
 public slots:
   void doComputeThreaded(int epoch);
+  void doNewtonThreaded(int epoch);
 signals:
   void doneCompute(MandelEvaluator *me);
   void doneComputeThreaded(MandelEvaluator *me);
   void doneNewton(MandelEvaluator *me, int result);
+  void doneNewtonThreaded(MandelEvaluator *me);
 };
 
 #endif // MANDELEVALUATOR_HPP

@@ -3,7 +3,6 @@
 
 #include <QObject>
 #include <QImage>
-//#include <QMutex>
 #include <QReadWriteLock>
 
 #include "ShareableImageWrapper.hpp"
@@ -19,11 +18,10 @@ public:
                       MandelMath::worker_multi *new_worker, MandelMath::worker_multi *new_sworker, MandelPointStore *new_store, int new_width, int new_height, const MandelMath::complex *new_c,
                       int inlog, int new_step_log);
   Q_INVOKABLE void setView_double(double c_re, double c_im, double scale);
-  void setView_(const MandelMath::complex *c, double scale);
+  void setView(const MandelMath::complex *c, double scale);
   Q_INVOKABLE void drag(double delta_x, double delta_y);
   Q_INVOKABLE void zoom(double x, double y, int inlog);
   Q_INVOKABLE void setImageSize(int width, int height);
-  //volano pouze ze setPrecision void setWorker(MandelMath::worker_multi *newWorker);
   void startNewEpoch();
   Q_INVOKABLE int writeToImage(ShareableImageWrapper img);
   void reimToPixel(int *circ_x, int *circ_y, const MandelMath::complex *c, MandelMath::number *tmp);
@@ -77,9 +75,9 @@ public:
   QVector<int> periodToIndexCache;
   int periodToIndex(int period);
 protected:
-  QReadWriteLock threading_mutex_;
-  bool giveWorkThreaded(MandelEvaluator *me);
-  bool doneWorkThreaded(MandelEvaluator *me, bool giveWork);
+  QReadWriteLock threading_mutex;
+  int giveWorkThreaded(MandelEvaluator *me);
+  int doneWorkThreaded(MandelEvaluator *me, bool giveWork);
 public slots:
   void doneWorkInThread(MandelEvaluator *me);
   void selectedPrecisionChanged();
@@ -90,14 +88,13 @@ signals:
 protected:
   MandelMath::worker_multi::Allocator *storeAllocator;
   MandelMath::worker_multi *storeWorker; //pointStore
-  MandelPointStore *pointStore_;
+  MandelPointStore *pointStore;
 
   //constexpr static int MAX_ZOOM_IN_DOUBLE=55;//53;
   //MandelMath::number_store::DbgType currentMath;
   int epoch;
   int imageWidth;
   int imageHeight;
-  //MandelPoint *pointStore;
   int nextGivenPointIndex;
   int effortBonus;
   //constexpr static int MAX_EFFORT=17;//131072 iters;
@@ -113,11 +110,9 @@ protected:
     double step_size__; //TODO: should use special methods on number to add, mul and div by 2^-step_log
     int cached_center_re_mod; //(center/step) mod 32768
     int cached_center_im_mod;
-    //Position(MandelMath::worker_multi::Allocator *allocator);
     Position(MandelMath::worker_multi::Allocator *allocator, const Position *source);
     ~Position();
     //void assign(Position *src);
-    //void setNumberType(MandelMath::worker_multi::Type ntype);
     void setView(const MandelMath::complex *c, double scale);
     void move(int delta_x, int delta_y);
     void scale(int inlog, int center_x, int center_y);
@@ -133,9 +128,6 @@ protected:
     //MandelMath::worker_multi::Allocator pointAllocator;
     //MandelPointStore pointDataStore;
     //-> evaluator.currentData MandelPoint pointData;
-    MandelMath::complex lagu_c;
-    MandelMath::complex lagu_r;
-    MandelMath::number tmp;
     struct Bulb
     {
       bool valid;
@@ -150,9 +142,9 @@ protected:
       ~Bulb();
       constexpr static int LEN=10;
     } bulb;
-    Orbit(MandelMath::worker_multi::Allocator *allocator, const Orbit *source);
+    Orbit(MandelMath::worker_multi::Allocator *allocator);
     ~Orbit();
-    constexpr static int LEN=0*MandelEvaluator::LEN+5+Bulb::LEN;
+    constexpr static int LEN=0*MandelEvaluator::LEN+Bulb::LEN;
   };
   struct PrecisionRecord
   {
@@ -162,15 +154,16 @@ protected:
     MandelPoint wtiPoint;
     Position position;
     Orbit orbit;
+    MandelMath::complex lagu_c;
+    MandelMath::complex lagu_r;
+    MandelMath::number tmp;
     int threadCount;
     MandelEvaluator **threads;
     PrecisionRecord(MandelMath::worker_multi *newWorker, PrecisionRecord *source, MandelModel *doneReceiver);
     ~PrecisionRecord();
+    constexpr static int LEN=ShareableViewInfo::LEN+MandelPoint::LEN+Position::LEN+Orbit::LEN+5  +6;
+      //setViewDouble=2 setView=2 updateCachedDepth=2 -> +6
   } *precisionRecord;
-  constexpr static int LEN=ShareableViewInfo::LEN+MandelPoint::LEN+Position::LEN+Orbit::LEN  +6;
-    //setViewDouble=2 setView=2 updateCachedDepth=2 -> +6
 };
-
-
 
 #endif // MANDELMODEL_H

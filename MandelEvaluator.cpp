@@ -24,7 +24,7 @@ void LaguerrePointStore::assign(const LaguerrePointStore *src)
 {
   assert(src!=nullptr);
   //TODO: if (src==nullptr) see LaguerrePoint::zero
-  state=src->state;
+  state=src->state.load();
   firstM=src->firstM;
   iter=src->iter;
 }
@@ -1182,6 +1182,7 @@ void MandelEvaluator::simple_multi(MandelMath::multiprec *cr, MandelMath::multip
 
 bool MandelEvaluator::startCompute(/*const MandelPoint *data,*/ int quick_route)
 {
+  //still called from paintOrbit()  dbgPoint();
   //currentParams=params;
   //currentData.assign(*data);
   if ((quick_route==1) ||
@@ -1202,6 +1203,7 @@ bool MandelEvaluator::startCompute(/*const MandelPoint *data,*/ int quick_route)
 
 void MandelEvaluator::doCompute()
 {
+  dbgPoint();
   timeInvokeSwitchTotal_+=timeInvoke_.nsecsElapsed();
   timeInner_.start();
   //simple_double(currentParams.cr_n.impl->store->as.doubl, currentParams.ci_n.impl->store->as.doubl, currentData, currentParams.maxiter);
@@ -1216,6 +1218,7 @@ void MandelEvaluator::doComputeThreaded(int epoch)
 {
   busyEpoch=epoch;
   timeThreaded.start();
+  threaded_errorcode=0;
 #if THREADED_DONE_GIVE_WORK
   if (threaded.give(this)) //debug && !wantStop)
 #endif
@@ -1225,7 +1228,8 @@ void MandelEvaluator::doComputeThreaded(int epoch)
       timeInvoke_.start();
 #if THREADED_DONE_GIVE_WORK
 #else
-      if (!threaded.give(this)) //debug && !wantStop)
+      threaded_errorcode=threaded.give(this); //debug && !wantStop)
+      if (threaded_errorcode)
         break;
 #endif
       timeInvokePostTotal_+=timeInvoke_.nsecsElapsed();
@@ -1233,7 +1237,47 @@ void MandelEvaluator::doComputeThreaded(int epoch)
       evaluate();
       timeInnerTotal_+=timeInner_.nsecsElapsed();
       timeOuter_.start();
-      if (!threaded.done(this, THREADED_DONE_GIVE_WORK))
+      threaded_errorcode=threaded.done(this, THREADED_DONE_GIVE_WORK);
+      if (threaded_errorcode)
+        break;
+      timeOuterTotal_+=timeOuter_.nsecsElapsed();
+    }
+    /*while (threaded.give(this))//debug && !wantStop)
+    {
+      evaluate();
+      if (!threaded.done(this))
+        break;
+    }*/
+  }
+  timeThreadedTotal+=timeThreaded.nsecsElapsed();
+  emit doneComputeThreaded(this);
+}
+
+void MandelEvaluator::doNewtonThreaded(int epoch)
+{
+  busyEpoch=epoch;
+  timeThreaded.start();
+  threaded_errorcode=0;
+#if THREADED_DONE_GIVE_WORK
+  if (threaded.give(this)) //debug && !wantStop)
+#endif
+  {
+    for (;;)
+    {
+      timeInvoke_.start();
+#if THREADED_DONE_GIVE_WORK
+#else
+      threaded_errorcode=threaded.give(this); //debug && !wantStop)
+      if (threaded_errorcode)
+        break;
+#endif
+      timeInvokePostTotal_+=timeInvoke_.nsecsElapsed();
+      timeInner_.start();
+      int result=newton(currentData.store->period, &currentParams.c, &currentData.f, true, 12);
+      timeInnerTotal_+=timeInner_.nsecsElapsed();
+      timeOuter_.start();
+      threaded_errorcode=threaded.doneNewton(this, result, THREADED_DONE_GIVE_WORK);
+      if (threaded_errorcode)
         break;
       timeOuterTotal_+=timeOuter_.nsecsElapsed();
     }
@@ -2332,6 +2376,9 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
   //maxm=1;
   //int multiplicity1=1;
   int lastm=1;
+  double lastm_err=0;
+  int prevm=1;
+  //double prevm_err=10;
   bool triedZeroGzrm=false;
   struct //instead, implement the last case in periodCheck()
   {
@@ -2357,48 +2404,14 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     //TODO: can we skip computing fzz_r if order1<0? and remember last valid multiplicity or set it to 1
     //always half of eps_cumul10   double eps_cumul05=0.5;
     //double fc_re=0, fc_im=0;
-    bulb.bulbe.eval_zz(period, c, r, true);
+    if (!bulb.bulbe.eval_zz(period, c, r, true))
+      return 0;
     newt.f_r.assign(&bulb.bulbe.f);
     newtres_.fz_r.assign(&bulb.bulbe.f_z);
     newt.fzz_r.assign(&bulb.bulbe.f_zz);
-    /*newt.f_r.assign(r);
-    newtres_.fz_r.zero(1, 0);
-    newt.fzz_r.zero(0, 0);
-    for (int i=0; i<period; i++)
-    {
-      double fzz_r_mag=newt.fzz_r.getMag_double();
-      double fz_r_mag=newtres_.fz_r.getMag_double();
-      double f_r_mag=newt.f_r.getMag_double();
-      if (fzz_r_mag+fz_r_mag+f_r_mag>1e60)
-        return 0;
-      //fzz:=2*(fz*fz + f*fzz)
-      newt.fzz_r.mul(&newt.f_r);
-      newt.tmp1.assign(&newtres_.fz_r);
-      newt.tmp1.sqr();
-      newt.fzz_r.add(&newt.tmp1);
-      newt.fzz_r.lshift(1);
-      //fz:=2*f*fz
-      newtres_.fz_r.mul(&newt.f_r);
-      newtres_.fz_r.lshift(1);
-
-      //f:=f^2
-      newt.f_r.sqr();
-
-      //f:=f+c
-      if (i+1==period)
-      { //f+=c-r instead of f:=f+c-r for better precision
-        newt.laguG.assign(c);
-        newt.laguG.sub(r);
-        newt.f_r.add(&newt.laguG);
-      }
-      else
-      {
-        newt.f_r.add(c);
-      }
-    }
     //g(r)=f(r)-r, gz(r)=fz(r)-1
     //newt.f_r.sub(r);
-    currentWorker->add_double(newtres_.fz_r.re, -1);*/
+    //currentWorker->add_double(newtres_.fz_r.re, -1);
     double g_r_mag=newt.f_r.getMag_double();
     double gz_r_mag=newtres_.fz_r.getMag_double();
     //newtres_.accy_tostop=eps_cumul;//r_mag_rough*eps_cumul10;
@@ -2447,15 +2460,21 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
       //if (g_r_mag<1.0*r_mag_rough*currentWorker->eps2()) //maybe up to (1+gz_r_mag)*r_mag*eps2*log2(period)
       //if (g_r_mag<eps_cumul10*r_mag_rough*currentWorker->eps2()) //maybe up to (1+gz_r_mag)*r_mag*eps2*log2(period)
 
+      bool cond1=prevm==lastm && lastm_err<0.125;//we don't *really* need prevm_err small   && prevm_err<0.125;
       //even better: once step<eps^(3/4), choose between previous and current root and that's it
-      bool stepgood=newt.newtX.getMag_double()<currentWorker->eps234();
+      bool stepgood=lastm==1 && cond1 &&
+                    (newt.newtX.getMag_double()<currentWorker->eps234() ||
+                     period<=1 || //with some luck, we did a Laguerre step and that hits the root in one step (period=1 .. degree=2)
+                     //when gz_r_mag<eps^(1/4), we won't make steps smaller than eps234
+                     //newt.newtX.getMag_double()<currentWorker->eps234()*newtres_.accy_multiplier || //covers newt.newtX.getMag_double()<currentWorker->eps234()
+                     prev_grmag<2*currentWorker->eps2()); //hopefully better than currentWorker->eps234()*newtres_.accy_multiplier
 
       //for multiple root, step never gets small, but value does
       //bool ggood=prev_grmag<currentWorker->eps234();
       //if prevm==2 we arrive at the middle of the 2 roots and we're not quite done yet
       //for prevm>2 there is actually a root in the middle so all is good
       //before unleashing the full power of prevm>lastm, lemme try
-      bool ggood=lastm>1 && prev_grmag<currentWorker->eps234();
+      bool ggood=lastm>1 && cond1 && prev_grmag<currentWorker->eps234();
       if (newtonCycle>0 && (stepgood || ggood))
       {
         if (g_r_mag>prev_grmag)
@@ -2488,7 +2507,7 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
       bestfm=g_r_mag;
       newt.bestr.assign(r);
     };
-    if (newtonCycle>0 && g_r_mag>prev_grmag)//+1000*newtres_.accy_tostop*currentWorker->eps2())
+    if (newtonCycle>0 && g_r_mag>=prev_grmag)//+1000*newtres_.accy_tostop*currentWorker->eps2())
     { //g_r_mag didn't go down and it wasn't because of limited precision
       //no reason to continue from here, polynomials don't have poles
       //undo half of last step and try again
@@ -2496,13 +2515,29 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
       //r->add(&newt.newtX);
       r->assign(&newt.prevR); //Justin Case
       r->sub(&newt.newtX);
+      if (r->isequal(&newt.prevR))
+      {
+        newt.newtX.zero();
+        //prevm_err=0;
+        lastm_err=0;
+        prevm=lastm;
+      }
       continue;
     };
     prev_grmag=g_r_mag; //almost like bestfm?
     prev_accy_multiplier=newtres_.accy_multiplier;
     newt.prevGz.assign(&newtres_.fz_r);
 
-    /* derive Laguerre's method, multiplicity m!=1, order of poly=n
+    /*
+    see also: Gaston H. Gonne: A Study of Iteration Formulas for Root Finding,
+              Where Mathematics, Computer Algebra and Software Engineering Meet
+    https://www.math.uni-bielefeld.de/~rehmann/ECM/cdrom/3ecm/pdfs/pant3/gonnet.pdf
+    eta=1-H/G^2
+
+    see also jenkins-traub: https://github.com/jervisfm/JenkinsTraub/blob/master/poly.py
+    (not used at all, requires manipulation of coefficients)
+
+    derive Laguerre's method, multiplicity m!=1, order of poly=n
     assume roots A and B, distance a=z-A away, others b=z-B away
     f(z)=C (z-A)^m (z-B)^(n-m)
     take ln, diff twice
@@ -2513,7 +2548,7 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     -H = (f''(z)*f(z) - f'(z)*f'(z)) / f(z)^2 = - m/a^2 - (n-m)/b^2
     G = m/a + (n-m)/b
     H = m/a^2 + (n-m)/b^2
-    solve for aa=1/a from G=f'/f, H=G^2-f''/f   X=f'^2/(f''*f) = G^2/H
+    solve for aa=1/a from G=f'/f, H=G^2-f''/f
     (G-m*aa)=(n-m)/b
     H*(n-m) = m*(n-m)*aa^2 + (G-m*aa)^2
     0 = m*n*aa^2 - 2*m*G*aa + G^2-H*(n-m)
@@ -2571,6 +2606,25 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     a=f/f'/(1/n +- sqrt( (1/m-1/n)*(1-1/n) ))
     x+1=0 f''=0 f'=1 f=1 G=1
     1=1/1/(1/1 +- sqrt( (1/m-1/1)*(1-1/1) ))    any m
+
+    ostrowski-1 (method 3 from [Gonnet]): delta/sqrt(1-eta) = sqrt(1/H) = sqrt(m)/G
+    ostrowski-n (method 22 from [Gonnet]): 1/G/sqrt(1-eta-eta^2/(n-1)) = sqrt(1/H)/sqrt(1-(m+1/m-2)/(n-1))
+      blows if H=0 or m+1/m=n+1: for n=1, m=1; for n=2, m=2.62; for n=3, m=3.73 so should never blow
+      [petkovic] says choose sqrt that sqrt(H) is closer to G/m, means sqrt(1/H) is closer to m/G
+      also that x2:=x-sign(f*f')/sqrt(H) at https://miodragpetkovic.com/publikacije/on-some-improvements-of-square-root-iteration-for-polynomial-complex-zeros/ page 1
+    https://interval.louisiana.edu/reliable-computing-journal/volume-16/reliable-computing-16-pp-225-238.pdf
+      Ostrowski-Like Method for the Inclusion of a Single Complex Polynomial Zero∗
+      Mimica R. Milošević, Miodrag S. Petković
+      eq(14) can't figure out what they mean, looks like division by 0 to me
+      ...          sqrt(m)/sqrt(H-(N-m)/(x-x)^2)
+      from Gonnet: sqrt(m/H)/sqrt(1+(n-m)(m-1)/(n-1)) = (G/H)/sqrt(1+(n-m)(m-1)/(n-1))
+    https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.723.1400&rep=rep1&type=pdf
+    Beny Neta, Changbum Chun: On a family of Laguerre methods to find multiple roots of nonlinear equations
+      lagu-m: 2m/G/(1+-sqrt(2m-1-2mff''/f'^2)) "Euler-Cauchy"
+              2/(G/m+-sqrt(2H-G^2/m)/sqrt(m))   H=G^2/M
+              2sqrt(1/H)/(1+1/sqrt(m)) if m=M   ; for m=10 about 1/2 step of ostro-m
+      ostro-m: sqrt(m)/sqrt(H)
+        notice that my lagu-m for n->inf becomes ostrowski-m
 
 
     ----- how to find m ----
@@ -2746,12 +2800,16 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
           m=maxm;
       }
 #else
+      //using lastm_err instead if (!(mum_re>=0.5)) //also m=1 if mum_re is NaN    (mum_re<0.5)
+      //  m=0;
       if (!(mum_re>=1.3)) //also m=1 if mum_re is NaN    (mum_re<1.3)
         m=1;
       else {/*if (abs(mum_im)>mum_re/2)
         m=1;
       else {*/
-        m=qRound(mum_re);
+        m=qRound(mum_re); //some say qRound(sqrt(mum_re*mum_re+mum_im*mum_im))
+        //TODO: try m=qRound(sqrt(mum_re*mum_re+mum_im*mum_im));
+        //  does it have singularities in the same places?
         if (m>maxm)
           m=maxm;
       }
@@ -2849,6 +2907,17 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
         newtres_.first_neumaier2_re=(fzm + sqrt(fzm*fzm+2*fm*fzzm))/fzzm;
         newtres_.first_neumaier2_im=0;
 
+        /* Ostrowski theorem from page 1 of
+        A theorem on clusters of roots of polynomial equations - A.M.Ostrowski
+        https://epubs.siam.org/doi/epdf/10.1137/0707046
+        R1C=2f/f' R1X=f'/f''  if R1C<R1X, contains 1 root in R1C and no roots in R1C..R1X
+        R2C=max(sqrt(8f/f''), 8f'/f'') R2X=3/2*f''/f'''  if R2C<R2X, contains 2 roots in R2C and not roots in R2C..R2X
+        */
+        newtres_.ostrowski_r1c=2*fm/fzm;
+        newtres_.ostrowski_r1x=fzm/fzzm;
+        newtres_.ostrowski_r2c=std::max(sqrt(8*fm/fzzm), 8*fzm/fzzm);
+        //no f''' for r2x
+
         /* naive: approximate f with c(x-a)^m
         m=f'^2/(f'^2-f f'') = f'^2/f^2/(f'^2/f^2-f''/f)=G^2/H
         x-a=m/(f'/f)=m/G=G/H    looks good if |m_im|<|m_re|
@@ -2889,9 +2958,10 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
 
         /* even naiver: show the 2 roots of c(x-a)(x-b) that have the same f, f', f''
         w.l.o.g. x=0
-        c(x^2-(a+b)x+ab)=f''x^2/2+f'x+f
-        cx^2-c(a+b)x+cab=f''x^2/2+f'x+f
+        c(x^2-(a+b)x+ab)=f''x^2/2+f'x+f   just solve Ax^2+Bx+C where A=f''/2 B=f' C=f
+        //cx^2-c(a+b)x+cab=f''x^2/2+f'x+f
         -f'/f''+-sqrt(f'^2/f''^2-2*f/f'')
+        f/(-f'+-sqrt(f'^2-2f''f))
 
         if x1 close to x2 (relative to x), use (x1+x2)/2 else use x1
         at |x1|=|x2|, 90 degrees..mult~2, use (x1+x2)/2
@@ -2993,7 +3063,10 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
         newtres_.first_lagu1o_re=r_re-newtres_.first_lagu1o_re;
         newtres_.first_lagu1o_im=r_im-newtres_.first_lagu1o_im;
       };
+    prevm=lastm;
+    //prevm_err=lastm_err;
     lastm=m;
+    lastm_err=(mum_re-m)*(mum_re-m)+mum_im*mum_im;
     bool lagu_valid=false;
     bool newt_valid=false;
     if (order1>=0)
@@ -3004,7 +3077,7 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
       newt.laguX.assign(&newt.laguG2);
       newt.laguX.lshift(-period); //G^2/n
       newt.laguX.rsub(&newt.laguH); //H-G^2/n
-      newt.tmp2.zero(m);
+      newt.tmp2.zero(lastm);
       newt.tmp2.recip();
       newt.tmp2.add_double(-order1); //1/m-1/n
       currentWorker->mul(newt.laguX.re, newt.tmp2.ptr);
@@ -3046,9 +3119,9 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
       newt.newtX.assign(&newtres_.fz_r);
       newt.newtX.recip();
       newt.newtX.mul(&newt.f_r); //f/f'
-      if (m!=1)
+      if (lastm>1)
       {
-        newt.tmp2.zero(m);
+        newt.tmp2.zero(lastm);
         currentWorker->mul(newt.newtX.re, newt.tmp2.ptr);
         currentWorker->mul(newt.newtX.im, newt.tmp2.ptr);
       };
@@ -3087,7 +3160,7 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     }
     else
     {
-      if (fastHoming && (newtonCycle<2) && (m>1))
+      if (fastHoming && (newtonCycle<2) && (lastm>1))
       {
         newt.newtX.assign(&newt.laguX);
       }
@@ -3105,11 +3178,11 @@ int MandelEvaluator::newton(int period, const MandelMath::complex *c, MandelMath
     newt.prevR.assign(r);
     r->sub(&newt.newtX);
   } //for newtonCycle
-  return lastm; //if we get here and |newtres.fz_r|<1, increase magic multiplier at newtres.accy_tostop
+  return lastm;
 }
 
 //result=0 means the period check failed; -1 means the check failed and the root returned is invalid
-int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, const MandelMath::complex *c, const MandelMath::complex *root_seed)
+int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, const MandelMath::complex *c, const MandelMath::complex *root_seed, bool exactMatch)
 {
   if (period<1)
   {
@@ -3132,19 +3205,30 @@ int MandelEvaluator::periodCheck(int period/*must =eval.lookper_lastGuess*/, con
   { //TODO: is this correct? we're not evaluating at root, just some point around here...
     return -1;
   };*/
-
-  if (period>MAX_PERIOD)
-  {
-    return -1; //special case
-  };
   if (aroundCount==0)
     aroundCount=1; //a fresh nearestIteration means this is a new atom, so mult=2
-  int newtRes=newton(period, c, &currentData.root, true, 1+aroundCount);
-  totalNewtonIterations+=newtres_.cyclesNeeded*period;
-  if (newtRes<=0)
-  { //this, of course, means that Newton() should be improved, not that there's a problem with the numbers
-    return -1; //e.g. evaluating the initial guess mand.root leads to overflow immediately
-  };
+
+  if (exactMatch)
+  {
+    if (!bulb.bulbe.eval_zz(period, c, &currentData.root, true))
+      return -1;
+    newtres_.fz_r.assign(&bulb.bulbe.f_z);
+    newtres_.accy_multiplier=0;//try 5
+    newtres_.accy_tostop=0;//try 1
+  }
+  else
+  {
+    if (period>MAX_PERIOD)
+    {
+      return -1; //special case
+    };
+    int newtRes=newton(period, c, &currentData.root, true, 1+aroundCount);
+    totalNewtonIterations+=newtres_.cyclesNeeded*period;
+    if (newtRes<=0)
+    { //this, of course, means that Newton() should be improved, not that there's a problem with the numbers
+      return -1; //e.g. evaluating the initial guess mand.root leads to overflow immediately
+    };
+  }
 
   this->interior.fz.assign(&newtres_.fz_r);
   currentWorker->add_double(interior.fz.re, 1);
@@ -3785,7 +3869,7 @@ void MandelEvaluator::evaluate()
         testperiod=currentData.store->iter+1-currentData.store->lookper_startiter;//currentData.store->lookper_lastGuess;
         if (testperiod!=currentData.store->lookper_lastGuess)
           nop(); //at preperiodic, test=2 last=1 we want last=2 at 0+i but last=1 at -2
-        foundperiod=periodCheck(testperiod, &currentParams.c, &eval.lookper_nearr);
+        foundperiod=periodCheck(testperiod, &currentParams.c, &eval.lookper_nearr, true);
         if (foundperiod<0) //exact match but repelling
           foundperiod=testperiod;
         //should not do I think, for misiur or period currentData.store->lookper_lastGuess=foundperiod;
@@ -3794,7 +3878,7 @@ void MandelEvaluator::evaluate()
       }
       else if (currentWorker->toDouble(currentData.lookper_totalFzmag.ptr)<MAGIC_MIN_SHRINK)
       {
-        foundperiod=periodCheck(testperiod, &currentParams.c, &eval.lookper_nearr); //updates iter, f, f_c, root
+        foundperiod=periodCheck(testperiod, &currentParams.c, &eval.lookper_nearr, false); //updates iter, f, f_c, root
         /* does not clean period any more, so no point in calling it
         if ((foundperiod>0) && (foundperiod<testperiod))
         {
